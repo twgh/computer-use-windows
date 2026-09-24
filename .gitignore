@@ -1,0 +1,14 @@
+# Dependency directories (remove the comment below to include it)
+# vendor/
+.idea/
+.vscode/
+.qoder/
+.codebuddy/
+.workbuddy/
+__pycache__/
+.runtime/
+dist/
+node_modules/
+
+# Files
+*.bat

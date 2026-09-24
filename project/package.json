@@ -1,0 +1,38 @@
+{
+  "name": "computer-use-windows",
+  "version": "0.1.1",
+  "description": "Top-level Windows computer-use skill with a bundled standalone runtime and MCP server, usable from any MCP-capable agent client.",
+  "type": "module",
+  "bin": {
+    "computer-use-windows": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "skill",
+    "portable-skill",
+    "computer-use",
+    "windows",
+    "automation",
+    "desktop-automation",
+    "mcp",
+    "ai-agents"
+  ],
+  "author": "haoc",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
