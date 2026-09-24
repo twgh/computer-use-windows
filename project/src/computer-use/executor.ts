@@ -7,9 +7,10 @@ import type {
   RunningApp,
   ScreenshotResult,
 } from '../vendor/computer-use-mcp/executor.js'
-import { API_RESIZE_PARAMS, targetImageSize } from '../vendor/computer-use-mcp/imageResize.js'
+import { targetImageSize } from '../vendor/computer-use-mcp/imageResize.js'
 import { sleep } from '../lib/sleep.js'
 import { CLI_CU_CAPABILITIES, CLI_HOST_BUNDLE_ID } from './common.js'
+import { getImageResizeParams } from './gates.js'
 import { callPythonHelper } from './pythonBridge.js'
 
 const SCREENSHOT_JPEG_QUALITY = 0.75
@@ -33,7 +34,9 @@ type PythonResolvePrepareCaptureResult = ResolvePrepareCaptureResult
  * unaffected, which is why this hid for so long.
  */
 function screenshotTargetDims(width: number, height: number): [number, number] {
-  return targetImageSize(width, height, API_RESIZE_PARAMS)
+  // Budget read per capture so `COMPUTER_USE_IMAGE_MAX_*` can be changed without
+  // a restart, and so `native` really means "hand over the raw capture".
+  return targetImageSize(width, height, getImageResizeParams())
 }
 
 /**
@@ -50,7 +53,7 @@ function zoomTargetDims(
   return targetImageSize(
     Math.round(physicalW * scaleFactor),
     Math.round(physicalH * scaleFactor),
-    API_RESIZE_PARAMS,
+    getImageResizeParams(),
   )
 }
 
