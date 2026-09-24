@@ -35,7 +35,7 @@
 - MCP stdio 握手、`tools/list`、权限门控（未授权时截图被正确拒绝并提示先调 `request_access`）
 - 实操链路：窗口激活、`left_click` 点击落点（150% DPI 缩放下坐标换算正确）、键盘组合键、Unicode 文本输入（空格/中文/全角标点完整）
 - UAC / 管理员窗口：提权窗口可正确识别、截图与窗口管理正常；非提权 runtime 注入的输入被 Windows UIPI 拦截，helper 会显式报错并提示以管理员运行 runtime
-- TODO: 混合 DPI 场景因测试机三屏同缩放而未覆盖
+- 混合 DPI 场景, 多屏不同缩放验证通过
 
 ## 架构
 
