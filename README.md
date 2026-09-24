@@ -1,4 +1,4 @@
-# Windows Computer-Use Skill 0.1.1
+# Windows Computer-Use Skill 0.2.0
 
 ## 项目定位
 
@@ -107,11 +107,14 @@ npm run build
 ### 打包分发
 
 ```bash
+python scripts/validate_skill.py .   # 先校验 skill 结构
 cd scripts
-python package_skill.py            # 生成 computer-use-windows.zip
+python package_skill.py              # 生成 computer-use-windows.zip
 ```
 
 打包会排除 `dist/`、`node_modules/`、`.runtime/`、`scripts/`、`README.md`、`LICENSE` —— 安装方需按上文自行构建。
+
+`validate_skill.py` 与本仓库外的通用校验器不同之处在于它显式按 UTF-8 读取，因此在中文 Windows（默认 GBK）上不会因非 ASCII 的 `description` 崩溃。
 
 ## 运行说明
 
@@ -163,9 +166,16 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 
 ### 已知限制
 
-- `screenshot` / `zoom` 的 `save_to_disk` 参数仅在 schema 中声明，当前实现不会写盘；截图通过 MCP image content 返回。
-- `COMPUTER_USE_MOUSE_ANIMATION` 与 `COMPUTER_USE_HIDE_BEFORE_ACTION` 在当前 Windows 后端不产生实际效果。
+- `resolvePrepareCapture` 的 `autoResolve` 与 `focusBeforeAction` 选项沿用 macOS 实现：Windows helper 只用 `preferredDisplayId` 与目标尺寸，两个布尔值被忽略。`COMPUTER_USE_AUTO_TARGET_DISPLAY` 仍然控制截图前是否走自动定位路径。
 - `check_permissions` 在 Windows 上恒返回已授权，因此 `tcc_not_granted` 分支不会触发。
+- 鼠标缓动（`COMPUTER_USE_MOUSE_ANIMATION`）默认开启，按距离计算时长（2000 px/秒，上限 0.5 秒），因此点击密集的任务每次点击最多多等约 0.5 秒。追求速度可设为 `0`。
+
+### 与 0.1.x 的差异
+
+- `COMPUTER_USE_HIDE_BEFORE_ACTION` 更名为 `COMPUTER_USE_FOCUS_BEFORE_ACTION`（Windows 侧从不隐藏窗口）。旧名仍被识别，仅在新名未设置时作为回退生效。
+- `save_to_disk: true` 现在真的写盘：输出到 `%TEMP%\computer-use-windows\` 并在结果里返回绝对路径。
+- `list_granted_applications` 的返回值新增 `coordinateMode`，与工具描述一致。
+- 删除了 `inputLoader.ts` / `swiftLoader.ts` / `escHotkey.ts` / `drainRunLoop.ts` 四个遗留占位模块（调用即抛错，本 runtime 从未使用）。
 
 ## 项目结构
 
@@ -178,13 +188,14 @@ references/
   troubleshooting.md   # 常见故障定位与处置
 project/
   src/
-    computer-use/      # Windows 适配层（executor / gates / pythonBridge / 锁）
+    computer-use/      # Windows 适配层（executor / gates / pythonBridge / imageSave / 锁）
     vendor/computer-use-mcp/  # 平台无关的 MCP 工具与门控框架
   runtime/             # Windows Python helper 与依赖清单
   dist/                # 构建产物（不随 zip 分发）
   .runtime/            # 自举 venv 与依赖 stamp（不随 zip 分发）
 scripts/
   package_skill.py     # 打包分发脚本
+  validate_skill.py    # skill 结构校验（UTF-8 安全，无第三方依赖）
 ```
 
 ## 路线图

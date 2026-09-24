@@ -15,7 +15,7 @@
  * gates are, in order:
  *   a. `prepareForAction` — hide every non-allowlisted app, then defocus us
  *      (battle-tested pre-action sequence from the Vercept acquisition).
- *      Sub-gated via `hideBeforeAction`. After this runs the screenshot is
+ *      Sub-gated via `focusBeforeAction`. After this runs the screenshot is
  *      TRUE (what the
  *      model sees IS what's at each pixel) and we are not keyboard-focused.
  *   b. Frontmost gate — branched by actionKind:
@@ -55,6 +55,7 @@ import type {
   CuAppPermTier,
   CuGrantFlags,
   CuPermissionRequest,
+  CuSavedImageKind,
   CuSubGates,
   CuTeachPermissionRequest,
   Logger,
@@ -422,7 +423,7 @@ async function runInputActionGates(
   // runs, the frontmost gate below becomes a rare edge-case detector (something
   // popped up between prepare and action) rather than a normal-path blocker.
   // ALL grant tiers stay visible — visibility is the baseline (tier "read").
-  if (subGates.hideBeforeAction) {
+  if (subGates.focusBeforeAction) {
     const hidden = await adapter.executor.prepareForAction(
       overrides.allowedApps.map((a) => a.bundleId),
       overrides.selectedDisplayId,
@@ -1707,7 +1708,7 @@ async function executeTeachStep(
     return { kind: "ok", results: [] };
   }
 
-  if (subGates.hideBeforeAction) {
+  if (subGates.focusBeforeAction) {
     const hidden = await adapter.executor.prepareForAction(
       overrides.allowedApps.map((a) => a.bundleId),
       overrides.selectedDisplayId,
@@ -1719,7 +1720,7 @@ async function executeTeachStep(
 
   const stepSubGates: CuSubGates = {
     ...subGates,
-    hideBeforeAction: false,
+    focusBeforeAction: false,
     pixelValidation: false,
     // Anchors are pre-computed against the display at batch start.
     // A mid-batch resolver switch would break tooltip positioning.
@@ -1785,7 +1786,9 @@ async function appendTeachScreenshot(
   overrides: ComputerUseOverrides,
   subGates: CuSubGates,
 ): Promise<CuCallToolResult> {
-  const shotResult = await handleScreenshot(adapter, overrides, subGates);
+  // No args: a teach-mode screenshot is always auto-captured, so there is no
+  // model-supplied `save_to_disk` flag to honor.
+  const shotResult = await handleScreenshot(adapter, {}, overrides, subGates);
   if (shotResult.isError) {
     // Hide+screenshot failed (rare — e.g. SCContentFilter error). Don't
     // tank the step; just omit the image. Model will call screenshot
@@ -2050,8 +2053,41 @@ async function buildMonitorNote(
   return undefined;
 }
 
+/**
+ * `save_to_disk: true` support, shared by `screenshot` and `zoom`.
+ *
+ * Returns the text line to add to the tool result, or undefined when the model
+ * didn't ask to save. Never throws and never suppresses the image: the model
+ * asked to SEE the screenshot and merely also wanted a file, so a write failure
+ * is reported alongside the image rather than replacing it. A missing writer
+ * callback is reported too — silently ignoring the flag would leave the model
+ * believing a path exists.
+ */
+async function saveToDiskNote(
+  overrides: ComputerUseOverrides,
+  args: Record<string, unknown>,
+  base64: string,
+  kind: CuSavedImageKind,
+): Promise<string | undefined> {
+  if (args.save_to_disk !== true) return undefined;
+  if (!overrides.saveImageToDisk) {
+    return (
+      "save_to_disk was requested, but this session has no image writer wired — " +
+      "the image below is returned only."
+    );
+  }
+  try {
+    const savedPath = await overrides.saveImageToDisk(base64, kind);
+    return `Saved the image to ${savedPath}`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Failed to save the image to disk: ${msg}. The image below is still returned.`;
+  }
+}
+
 async function handleScreenshot(
   adapter: ComputerUseHostAdapter,
+  args: Record<string, unknown>,
   overrides: ComputerUseOverrides,
   subGates: CuSubGates,
 ): Promise<CuCallToolResult> {
@@ -2080,10 +2116,10 @@ async function handleScreenshot(
       allowedBundleIds,
       preferredDisplayId: overrides.selectedDisplayId,
       autoResolve,
-      // Keep the hideBeforeAction sub-gate independently rollable —
+      // Keep the focusBeforeAction sub-gate independently rollable —
       // atomic path honors the same toggle the non-atomic path checks
       // at the prepareForAction call site.
-      doHide: subGates.hideBeforeAction,
+      focusBeforeAction: subGates.focusBeforeAction,
     });
 
     // Non-atomic path's takeScreenshotWithRetry has a MIN_SCREENSHOT_BYTES
@@ -2155,10 +2191,18 @@ async function handleScreenshot(
       overrides.onDisplayPinned !== undefined,
     );
 
+    const saveNote = await saveToDiskNote(
+      overrides,
+      args,
+      shot.base64,
+      "screenshot",
+    );
+
     return {
       content: [
         ...(monitorNote ? [{ type: "text" as const, text: monitorNote }] : []),
         ...(hiddenNote ? [{ type: "text" as const, text: hiddenNote }] : []),
+        ...(saveNote ? [{ type: "text" as const, text: saveNote }] : []),
         {
           type: "image",
           data: shot.base64,
@@ -2174,7 +2218,7 @@ async function handleScreenshot(
   // out, but the pixels BELOW it are what the model would see, and those are
   // NOT what's actually there. Hiding first makes the screenshot TRUE.
   let hiddenSinceLastSeen: string[] = [];
-  if (subGates.hideBeforeAction) {
+  if (subGates.focusBeforeAction) {
     const hidden = await adapter.executor.prepareForAction(
       overrides.allowedApps.map((a) => a.bundleId),
       overrides.selectedDisplayId,
@@ -2222,10 +2266,18 @@ async function handleScreenshot(
     overrides.onDisplayPinned !== undefined,
   );
 
+  const saveNote = await saveToDiskNote(
+    overrides,
+    args,
+    shot.base64,
+    "screenshot",
+  );
+
   return {
     content: [
       ...(monitorNote ? [{ type: "text" as const, text: monitorNote }] : []),
       ...(hiddenNote ? [{ type: "text" as const, text: hiddenNote }] : []),
+      ...(saveNote ? [{ type: "text" as const, text: saveNote }] : []),
       {
         type: "image",
         data: shot.base64,
@@ -2306,9 +2358,16 @@ async function handleZoom(
     last.displayId,
   );
 
+  const saveNote = await saveToDiskNote(overrides, args, zoomed.base64, "zoom");
+
   // Return the image. NO `.screenshot` piggyback — this is the invariant.
+  // The save note (when requested) is text-only and does not touch
+  // `lastScreenshot` either.
   return {
-    content: [{ type: "image", data: zoomed.base64, mimeType: "image/jpeg" }],
+    content: [
+      ...(saveNote ? [{ type: "text" as const, text: saveNote }] : []),
+      { type: "image", data: zoomed.base64, mimeType: "image/jpeg" },
+    ],
   };
 }
 
@@ -2902,6 +2961,9 @@ function handleListGrantedApplications(
   return okJson({
     allowedApps: overrides.allowedApps,
     grantFlags: overrides.grantFlags,
+    // The tool description promises this — the model needs it to interpret its
+    // own coordinate space when debugging a mis-aimed click (pixels vs %).
+    coordinateMode: overrides.coordinateMode,
   });
 }
 
@@ -3264,7 +3326,7 @@ interface BatchActionResult {
  *     sequence without intermediate screenshots; validating mid-batch clicks
  *     against a pre-batch screenshot would false-positive constantly.
  *
- * Both skips are implemented by passing `{...subGates, hideBeforeAction:
+ * Both skips are implemented by passing `{...subGates, focusBeforeAction:
  * false, pixelValidation: false}` to each inner dispatch — the handlers'
  * existing gate logic does the right thing, no new code paths.
  *
@@ -3306,8 +3368,8 @@ async function handleComputerBatch(
   }
 
   // prepareForAction ONCE. After this, inner dispatches skip it via
-  // hideBeforeAction:false.
-  if (subGates.hideBeforeAction) {
+  // focusBeforeAction:false.
+  if (subGates.focusBeforeAction) {
     const hidden = await adapter.executor.prepareForAction(
       overrides.allowedApps.map((a) => a.bundleId),
       overrides.selectedDisplayId,
@@ -3322,7 +3384,7 @@ async function handleComputerBatch(
   // unconditionally.
   const batchSubGates: CuSubGates = {
     ...subGates,
-    hideBeforeAction: false,
+    focusBeforeAction: false,
     pixelValidation: false,
     // Batch already took its screenshot (appended at end); a mid-batch
     // resolver switch would make that screenshot inconsistent with
@@ -3407,7 +3469,7 @@ async function dispatchAction(
 ): Promise<CuCallToolResult> {
   switch (name) {
     case "screenshot":
-      return handleScreenshot(adapter, overrides, subGates);
+      return handleScreenshot(adapter, a, overrides, subGates);
 
     case "zoom":
       return handleZoom(adapter, a, overrides);

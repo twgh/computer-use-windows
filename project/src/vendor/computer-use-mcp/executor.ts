@@ -66,7 +66,7 @@ export interface ComputerExecutor {
     allowedBundleIds: string[]
     preferredDisplayId?: number
     autoResolve: boolean
-    doHide?: boolean
+    focusBeforeAction?: boolean
   }): Promise<ResolvePrepareCaptureResult>
   screenshot(opts: { allowedBundleIds: string[]; displayId?: number }): Promise<ScreenshotResult>
   zoom(

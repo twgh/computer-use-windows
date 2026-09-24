@@ -24,6 +24,10 @@
 
 `COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 在进程启动时读取一次。必须重启 server 进程（多数客户端需要重新加载 MCP 配置）。
 
+子开关（`COMPUTER_USE_MOUSE_ANIMATION`、`COMPUTER_USE_FOCUS_BEFORE_ACTION`、`COMPUTER_USE_CLIPBOARD_GUARD` 等）每次工具调用重新读取，改动即时生效。
+
+其中 `COMPUTER_USE_FOCUS_BEFORE_ACTION` 带旧名兼容：新名**优先**，只有在新名完全未设置时才回退读取已废弃的 `COMPUTER_USE_HIDE_BEFORE_ACTION`。所以旧配置（只写旧名）无需修改即可继续工作，而新名一旦出现就完全接管。若两个都写了，以新名为准。
+
 ## 二、Python 自举
 
 首次调用工具时会创建 `project/.runtime/venv` 并安装依赖，这一步失败会以 `executor_threw` 形式暴露为工具错误。
@@ -99,12 +103,15 @@
 - **显示器编号对不上 Windows 设置**：内部编号与系统编号来源不同。跨端沟通时用"型号 / 分辨率 / 缩放 / 左右上下方位"描述，不要用编号。
 - **看到不该出现的窗口**：本 runtime 上报 `screenshotFiltering: none`，截图不过滤非白名单窗口。这是设计如此，动作门控在 MCP 层而非 compositor 层。
 - **多屏时截图带有说明文本但只列出部分屏幕**：说明文本只在显示器 ≥ 2 块且（首次截图或目标屏变化）时出现，属预期行为。
+- **`save_to_disk: true` 没有拿到路径**：结果文本里会写明原因 —— 要么该会话没接上写盘能力（`save_to_disk was requested, but this session has no image writer wired`），要么写盘失败并附带系统错误（`Failed to save the image to disk: …`）。两种情况图像本体都照常返回，不会因落盘失败而丢图。目录 `%TEMP%\computer-use-windows\` 不存在时会自动创建。
 
 ## 七、重置与清理
 
 - 重建 Python 环境：删除 `project/.runtime/venv` 与 `project/.runtime/requirements.sha256`。
 - 释放卡住的会话锁：删除 `~/.computer-use-windows/computer-use.lock`（确认无活动会话后再删）。
 - 重新构建：`cd ./project && npm install && npm run build`。
+- 清理 `save_to_disk` 产生的图：删除 `%TEMP%\computer-use-windows\` 整个目录即可，其中没有任何状态。
+- 校验 skill 结构：`python ./scripts/validate_skill.py .`（UTF-8 安全，不依赖第三方库；检查 frontmatter、命名规范与 `references/` 引用是否都存在）。
 - 打包分发：`cd ./scripts && python package_skill.py`，产物为 `computer-use-windows.zip`（不含 `dist/`、`node_modules/`、`.runtime/`、`README.md`、`LICENSE`、`scripts/` —— 因此安装方必须自行构建，见 `SKILL.md`「准备 runtime」）。
 
 ## 八、排查时的硬性约束

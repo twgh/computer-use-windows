@@ -64,13 +64,18 @@ async function typeViaClipboard(text: string): Promise<void> {
   }
 }
 
-export function createCliExecutor(_opts: {
+export function createCliExecutor(opts: {
   getMouseAnimationEnabled: () => boolean
-  getHideBeforeActionEnabled: () => boolean
 }): ComputerExecutor {
   if (process.platform !== 'win32') {
     throw new Error(`createCliExecutor called on ${process.platform}. Computer control is Windows-only.`)
   }
+
+  // Resolved per action, not captured at construction: flipping
+  // COMPUTER_USE_MOUSE_ANIMATION mid-session takes effect on the next click
+  // without restarting the server. The helper owns the distance → duration
+  // math (it already has the cursor position, so this stays one round trip).
+  const animate = (): boolean => opts.getMouseAnimationEnabled()
 
   return {
     capabilities: {
@@ -160,7 +165,7 @@ export function createCliExecutor(_opts: {
     writeClipboard,
 
     async click(x, y, button, count, modifiers): Promise<void> {
-      await callPythonHelper('click', { x, y, button, count, modifiers })
+      await callPythonHelper('click', { x, y, button, count, modifiers, animate: animate() })
       await sleep(MOVE_SETTLE_MS)
     },
 
@@ -177,17 +182,17 @@ export function createCliExecutor(_opts: {
     },
 
     async drag(from, to): Promise<void> {
-      await callPythonHelper('drag', { from, to })
+      await callPythonHelper('drag', { from, to, animate: animate() })
       await sleep(MOVE_SETTLE_MS)
     },
 
     async moveMouse(x, y): Promise<void> {
-      await callPythonHelper('move_mouse', { x, y })
+      await callPythonHelper('move_mouse', { x, y, animate: animate() })
       await sleep(MOVE_SETTLE_MS)
     },
 
     async scroll(x, y, dx, dy): Promise<void> {
-      await callPythonHelper('scroll', { x, y, deltaX: dx, deltaY: dy })
+      await callPythonHelper('scroll', { x, y, deltaX: dx, deltaY: dy, animate: animate() })
     },
 
     async getFrontmostApp(): Promise<FrontmostApp | null> {

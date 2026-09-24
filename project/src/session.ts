@@ -8,6 +8,7 @@ import type {
 } from './vendor/computer-use-mcp/types.js'
 import { DEFAULT_GRANT_FLAGS } from './vendor/computer-use-mcp/types.js'
 import { checkComputerUseLock, tryAcquireComputerUseLock } from './computer-use/computerUseLock.js'
+import { saveImageToDisk } from './computer-use/imageSave.js'
 
 type State = {
   allowedApps: AppGrant[]
@@ -89,6 +90,10 @@ export function createSessionContext(): ComputerUseSessionContext {
     onScreenshotCaptured: dims => {
       state.lastScreenshotDims = dims
     },
+    // Backs `save_to_disk: true` on screenshot/zoom. Writes under the OS temp
+    // directory — never into the skill tree — and returns the absolute path the
+    // model reports to the user.
+    saveImageToDisk,
     checkCuLock: async () => {
       const result = await checkComputerUseLock()
       switch (result.kind) {

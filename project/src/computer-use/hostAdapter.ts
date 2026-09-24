@@ -23,7 +23,6 @@ export function getComputerUseHostAdapter(): ComputerUseHostAdapter {
     logger: new DebugLogger(),
     executor: createCliExecutor({
       getMouseAnimationEnabled: () => getChicagoSubGates().mouseAnimation,
-      getHideBeforeActionEnabled: () => getChicagoSubGates().hideBeforeAction,
     }),
     ensureOsPermissions: async () => {
       const perms = await callPythonHelper<{ accessibility: boolean; screenRecording: boolean }>('check_permissions', {})

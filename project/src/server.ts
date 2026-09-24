@@ -21,12 +21,13 @@ export async function runServer(): Promise<void> {
   const adapter = getComputerUseHostAdapter()
   const coordinateMode = getChicagoCoordinateMode()
   const context = createSessionContext()
-  const server = createComputerUseMcpServer(adapter, coordinateMode, context)
+  // Build the tool list BEFORE constructing the server: the `request_access`
+  // description enumerates this machine's installed apps, and only the host can
+  // do that executor round trip. Handing it to the factory keeps a single
+  // ListTools handler (the kill-switch check lives there).
   const installedAppNames = await getInstalledAppNames()
   const tools = buildComputerUseTools(adapter.executor.capabilities, coordinateMode, installedAppNames)
-  server.setRequestHandler((await import('@modelcontextprotocol/sdk/types.js')).ListToolsRequestSchema, async () =>
-    adapter.isDisabled() ? { tools: [] } : { tools },
-  )
+  const server = createComputerUseMcpServer(adapter, coordinateMode, context, tools)
   const transport = new StdioServerTransport()
   logDebug('starting stdio MCP server')
   await server.connect(transport)

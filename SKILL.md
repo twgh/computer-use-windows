@@ -1,6 +1,6 @@
 ---
 name: computer-use-windows
-version: 0.1.1
+version: 0.2.0
 description: Windows 桌面 computer-use 能力：截图（多显示器 / 混合 DPI / 区域放大）、鼠标点击与拖拽、键盘输入与组合键、应用启动与前台切换、剪贴板读写、窗口与显示器映射。自带独立 MCP server 与 Python runtime，首次运行自动自举，不依赖私有原生模块或提取的应用资产，适配任意支持 MCP 的 agent 客户端。当任务需要在 Windows 上操作用户桌面（截屏、点击、输入文字、按快捷键、启动或切换应用、读取剪贴板、多屏操作）时，使用本 skill。
 agent_created: false
 tags:
@@ -121,7 +121,7 @@ Python 侧无需手动准备，也不会在构建期安装。
 | `cursor_position` | — | — | 读取光标位置 |
 | `open_application` | `app` | — | 启动或把应用带到前台；须已在白名单 |
 | `switch_display` | `display` | — | 切换截图目标显示器，或传 `auto` 复位 |
-| `list_granted_applications` | — | — | 查看白名单与授权 flag |
+| `list_granted_applications` | — | — | 查看白名单、授权 flag 与当前坐标模式 |
 | `read_clipboard` | — | — | 需 `clipboardRead` |
 | `write_clipboard` | `text` | — | 需 `clipboardWrite` |
 | `computer_batch` | `actions[]` | — | 单次调用执行动作序列 |
@@ -186,7 +186,7 @@ Python 侧无需手动准备，也不会在构建期安装。
 
 - 仅将本机视为可信本地环境。
 - 严禁在 skill 或 project 目录内创建临时文件（截图、解码图片、JSON dump、测试输出、日志）。需要写盘时一律写入系统临时目录（Windows：`%TEMP%`，即 `C:\Users\<用户>\AppData\Local\Temp`）。`project/.runtime/` 下只允许存在自举 venv 及其锁 / 配置数据（`venv/`、`requirements.sha256`）。任务结束后清理自己产生的临时文件。
-- 截图通过 MCP image content 返回，**无需落盘**。`screenshot` / `zoom` 的 `save_to_disk` 参数当前仅声明、未实现，不要依赖它拿到文件路径。
+- 截图默认通过 MCP image content 直接返回，**无需落盘**。需要把图交给用户看时，给 `screenshot` / `zoom` 传 `save_to_disk: true`：运行时会写入 `%TEMP%\computer-use-windows\`，并在结果文本里给出绝对路径。这些图是临时产物，用完请清理。
 - 不要让用户去任何 agent 客户端的本地安装目录里寻找二进制或隐藏资产 —— 本 runtime 是独立的，只用公开依赖。
 - 说明当前 runtime 上报 `screenshotFiltering: none`，动作门控在 MCP 层处理。
 

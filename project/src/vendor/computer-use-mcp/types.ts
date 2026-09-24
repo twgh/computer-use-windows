@@ -8,6 +8,10 @@ import type {
  *  cross-respawn `scaleCoord` survival. */
 export type ScreenshotDims = Omit<ScreenshotResult, "base64">;
 
+/** Which tool produced a JPEG that is being persisted by `saveImageToDisk`.
+ *  Only used for the generated file name. */
+export type CuSavedImageKind = "screenshot" | "zoom";
+
 /** Shape mirrors an earlier browser-tools MCP types definition. */
 export interface Logger {
   info: (message: string, ...args: unknown[]) => void;
@@ -90,18 +94,32 @@ export interface CuSubGates {
   /** Route `type("foo\nbar")` through clipboard instead of keystroke-by-keystroke. */
   clipboardPasteMultiline: boolean;
   /**
-   * Ease-out-cubic mouse glide at 60fps, distance-proportional duration
-   * (2000 px/sec, capped at 0.5s). Adds up to ~0.5s latency
-   * per click. When off, cursor teleports instantly.
+   * Ease-out-cubic mouse glide, distance-proportional duration (2000 px/sec,
+   * capped at 0.5s). Adds up to ~0.5s latency per click. When off, the cursor
+   * teleports instantly.
+   *
+   * Implemented in the platform backend: the Windows helper converts the
+   * travel distance into a pyautogui tween duration; the macOS host used a
+   * native `mouse.move`. Re-read per call — flipping it takes effect on the
+   * next action without a restart.
    */
   mouseAnimation: boolean;
   /**
-   * Pre-action sequence: hide non-allowlisted apps, then defocus us (from the
-   * Vercept acquisition). When off, the
-   * frontmost gate fires in the normal case and the model gets stuck — this
-   * is the A/B-test-the-old-broken-behavior switch.
+   * Pre-action preparation, run before every input action, screenshot, batch
+   * and teach step. Platform-defined:
+   *   - macOS host: hide every non-allowlisted app, then defocus us.
+   *   - Windows runtime: raise a granted app's window; nothing is hidden
+   *     (hiding windows would be far too intrusive there).
+   * Both variants exist so the frontmost gate passes in the normal case
+   * instead of leaving the model stuck on it. When off, that gate fires on the
+   * normal path — this is the A/B-test-the-old-broken-behavior switch.
+   *
+   * Named for the Win32 behavior this runtime actually performs. The macOS
+   * host treats it as hide-and-defocus.
+   *
+   * Renamed from `hideBeforeAction`: the Windows runtime never hid anything.
    */
-  hideBeforeAction: boolean;
+  focusBeforeAction: boolean;
   /**
    * Auto-resolve the target display before each screenshot when the
    * selected display has no allowed-app windows. When on, `handleScreenshot`
@@ -325,6 +343,14 @@ export interface ComputerUseSessionContext {
   onDisplayResolvedForApps?(sortedBundleIdsKey: string): void;
   /** Called after each screenshot. Host persists for respawn survival. */
   onScreenshotCaptured?(dims: ScreenshotDims): void;
+  /**
+   * Persist a JPEG that was returned to the model, for `save_to_disk: true`.
+   * Host-owned because only the host knows where the user wants files to land
+   * (the CLI runtime writes into the OS temp directory). Returns the absolute
+   * path reported back in the tool result. Undefined → `save_to_disk` returns a
+   * tool error instead of silently ignoring the flag.
+   */
+  saveImageToDisk?(base64: string, kind: CuSavedImageKind): Promise<string>;
   onTeachModeActivated?(): void;
   onTeachStep?(req: TeachStepRequest): Promise<TeachStepResult>;
   onTeachWorking?(): void;
@@ -415,6 +441,14 @@ export interface ComputerUseOverrides {
    * doesn't happen.
    */
   onAppsHidden?: (bundleIds: string[]) => void;
+
+  /**
+   * Per-call passthrough of `ComputerUseSessionContext.saveImageToDisk`.
+   * Consulted by `screenshot` / `zoom` when the model sets `save_to_disk:
+   * true`. Undefined → those tools report the flag as unsupported rather than
+   * pretending to have written a file.
+   */
+  saveImageToDisk?: (base64: string, kind: CuSavedImageKind) => Promise<string>;
 
   /**
    * Reads the clipboardGuard stash from session state. `undefined` means no

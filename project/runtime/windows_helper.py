@@ -36,8 +36,7 @@ if not user32_early.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
         except Exception:
             pass
 
-import mss
-
+import math
 import mss
 import psutil
 import pythoncom
@@ -743,8 +742,48 @@ def check_permissions() -> dict[str, bool]:
     return {"accessibility": True, "screenRecording": True}
 
 
-def click(x: int, y: int, button: str, count: int, modifiers: list[str] | None) -> None:
-    pyautogui.moveTo(x, y)
+# Distance-proportional pointer glide, mirroring the macOS backend's
+# ease-out-cubic motion: 2000 px/sec, capped at 500 ms so a cross-screen jump
+# never blocks a tool call longer than that. Gated by
+# COMPUTER_USE_MOUSE_ANIMATION (on by default). Disabled → the cursor teleports,
+# which is faster but can miss hover-only affordances: a widget that reacts to
+# the pointer path never sees one.
+GLIDE_PX_PER_SEC = 2000.0
+GLIDE_MAX_SECONDS = 0.5
+GLIDE_MIN_SECONDS = 0.01
+
+
+def _ease_out_cubic(t: float) -> float:
+    return 1.0 - (1.0 - t) ** 3
+
+
+def glide_seconds(x: int, y: int, animate: bool) -> float:
+    """Tween duration to reach (x, y). 0.0 means teleport."""
+    if not animate:
+        return 0.0
+    current = pyautogui.position()
+    distance = math.hypot(x - current.x, y - current.y)
+    duration = min(distance / GLIDE_PX_PER_SEC, GLIDE_MAX_SECONDS)
+    return duration if duration >= GLIDE_MIN_SECONDS else 0.0
+
+
+def move_pointer(x: int, y: int, animate: bool) -> None:
+    duration = glide_seconds(x, y, animate)
+    if duration <= 0.0:
+        pyautogui.moveTo(x, y)
+        return
+    pyautogui.moveTo(x, y, duration=duration, tween=_ease_out_cubic)
+
+
+def click(
+    x: int,
+    y: int,
+    button: str,
+    count: int,
+    modifiers: list[str] | None,
+    animate: bool = False,
+) -> None:
+    move_pointer(x, y, animate)
     if modifiers:
         normalized = [normalize_key(m) for m in modifiers]
         for key in normalized:
@@ -758,8 +797,8 @@ def click(x: int, y: int, button: str, count: int, modifiers: list[str] | None) 
         pyautogui.click(x=x, y=y, button=button, clicks=count, interval=0.08)
 
 
-def scroll(x: int, y: int, delta_x: int, delta_y: int) -> None:
-    pyautogui.moveTo(x, y)
+def scroll(x: int, y: int, delta_x: int, delta_y: int, animate: bool = False) -> None:
+    move_pointer(x, y, animate)
     if delta_y:
         pyautogui.scroll(int(delta_y), x=x, y=y)
     if delta_x:
@@ -1012,25 +1051,48 @@ def main() -> int:
             return 0
         if command == "click":
             _ensure_input_can_reach_foreground()
-            click(int(payload["x"]), int(payload["y"]), str(payload.get("button") or "left"), int(payload.get("count") or 1), payload.get("modifiers"))
+            click(
+                int(payload["x"]),
+                int(payload["y"]),
+                str(payload.get("button") or "left"),
+                int(payload.get("count") or 1),
+                payload.get("modifiers"),
+                bool(payload.get("animate")),
+            )
             json_output({"ok": True, "result": True})
             return 0
         if command == "drag":
             _ensure_input_can_reach_foreground()
+            animate = bool(payload.get("animate"))
             from_point = payload.get("from")
             if from_point:
-                pyautogui.moveTo(int(from_point["x"]), int(from_point["y"]))
-            pyautogui.dragTo(int(payload["to"]["x"]), int(payload["to"]["y"]), duration=0.2, button="left")
+                move_pointer(int(from_point["x"]), int(from_point["y"]), animate)
+            to_x = int(payload["to"]["x"])
+            to_y = int(payload["to"]["y"])
+            # Never below the original 0.2s: a zero-duration drag reads as a
+            # teleport and some drop targets never see the hover.
+            pyautogui.dragTo(
+                to_x,
+                to_y,
+                duration=max(0.2, glide_seconds(to_x, to_y, animate)),
+                button="left",
+            )
             json_output({"ok": True, "result": True})
             return 0
         if command == "move_mouse":
             _ensure_input_can_reach_foreground()
-            pyautogui.moveTo(int(payload["x"]), int(payload["y"]))
+            move_pointer(int(payload["x"]), int(payload["y"]), bool(payload.get("animate")))
             json_output({"ok": True, "result": True})
             return 0
         if command == "scroll":
             _ensure_input_can_reach_foreground()
-            scroll(int(payload["x"]), int(payload["y"]), int(payload.get("deltaX") or 0), int(payload.get("deltaY") or 0))
+            scroll(
+                int(payload["x"]),
+                int(payload["y"]),
+                int(payload.get("deltaX") or 0),
+                int(payload.get("deltaY") or 0),
+                bool(payload.get("animate")),
+            )
             json_output({"ok": True, "result": True})
             return 0
         if command == "mouse_down":

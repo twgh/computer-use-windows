@@ -18,7 +18,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -214,6 +214,7 @@ export function bindSessionContext(
         ? (req) => wrapTeachPermission(req, dialogAbort.signal)
         : undefined,
       onAppsHidden: ctx.onAppsHidden,
+      saveImageToDisk: ctx.saveImageToDisk,
       getClipboardStash: ctx.getClipboardStash,
       onClipboardStashChanged: ctx.onClipboardStashChanged,
       onResolvedDisplayUpdated: ctx.onResolvedDisplayUpdated,
@@ -256,21 +257,26 @@ export function createComputerUseMcpServer(
   adapter: ComputerUseHostAdapter,
   coordinateMode: CoordinateMode,
   context?: ComputerUseSessionContext,
+  tools?: Tool[],
 ): Server {
   const { serverName, logger } = adapter;
 
   const server = new Server(
-    { name: serverName, version: "0.1.1" },
+    { name: serverName, version: "0.2.0" },
     { capabilities: { tools: {}, logging: {} } },
   );
 
-  const tools = buildComputerUseTools(
-    adapter.executor.capabilities,
-    coordinateMode,
-  );
+  // The caller may pass a pre-built tool list: the CLI host splices this
+  // machine's installed-app names into the `request_access` description, which
+  // needs an executor round trip the server factory can't do. Building it here
+  // instead would overwrite that enrichment — `setRequestHandler` on the same
+  // schema replaces the previous handler silently. One handler, one source.
+  const toolList =
+    tools ??
+    buildComputerUseTools(adapter.executor.capabilities, coordinateMode);
 
   server.setRequestHandler(ListToolsRequestSchema, async () =>
-    adapter.isDisabled() ? { tools: [] } : { tools },
+    adapter.isDisabled() ? { tools: [] } : { tools: toolList },
   );
 
   if (context) {

@@ -9,7 +9,7 @@
 - 坐标一律是 `[x, y]` 两元素数组，语义见 `SKILL.md`「坐标规则」。
 - 成功结果为文本；结构化结果以单行 JSON 文本返回（如 `request_access`、`list_granted_applications`、`computer_batch`）。
 - 失败结果带 `isError: true` 与 `telemetry.error_kind`（`telemetry` 在返回 SDK 前被剥离，客户端看不到）。错误文本已分类，不含文件路径等敏感内容。
-- `screenshot` / `zoom` 的 `save_to_disk` 参数**当前未实现**，传了不会写盘。
+- `screenshot` / `zoom` 的 `save_to_disk: true` 会把 JPEG 写入 `%TEMP%\computer-use-windows\`，并在结果里多返回一条文本给出绝对路径。保存失败不会吞掉图像：错误信息与图像一起返回。
 - 除 `request_access` / `list_granted_applications` 外，所有工具都受白名单与 tier 门控（见 `SKILL.md`「权限与门控」）。
 
 ## 会话与访问控制
@@ -44,10 +44,14 @@
 
 ### `list_granted_applications`
 
-无参数。返回当前会话白名单与授权 flag：
+无参数。返回当前会话白名单、授权 flag 与坐标模式：
 
 ```json
-{ "allowedApps": [...], "grantFlags": { "clipboardRead": false, "clipboardWrite": false, "systemKeyCombos": false } }
+{
+  "allowedApps": [...],
+  "grantFlags": { "clipboardRead": false, "clipboardWrite": false, "systemKeyCombos": false },
+  "coordinateMode": "pixels"
+}
 ```
 
 ## 截图
@@ -58,7 +62,7 @@
 
 | 参数 | 类型 | 必需 | 说明 |
 | --- | --- | --- | --- |
-| `save_to_disk` | `boolean` | 否 | 声明为"保存到磁盘并返回路径"，**当前实现忽略该参数** |
+| `save_to_disk` | `boolean` | 否 | 写入 `%TEMP%\computer-use-windows\` 并在结果文本里返回绝对路径 |
 
 - 白名单为空时返回错误 `allowlist_empty`，不会返回图像。
 - 返回内容为一段可选文本 + JPEG 图像。文本仅在条件满足时出现：显示器 ≥ 2 块且（首次截图或目标显示器发生变化）时，说明本次截图所在显示器并列出其他显示器；若上次截图后有小动作被隐藏的窗口，会提示原因。
@@ -71,7 +75,7 @@
 | 参数 | 类型 | 必需 | 说明 |
 | --- | --- | --- | --- |
 | `region` | `[x0, y0, x1, y1]` | 是 | 矩形区域，坐标空间与最近一次全屏截图一致；`(x0,y0)` 左上、`(x1,y1)` 右下 |
-| `save_to_disk` | `boolean` | 否 | 同上，未实现 |
+| `save_to_disk` | `boolean` | 否 | 同上，写入 `%TEMP%\computer-use-windows\` 并返回路径 |
 
 后续点击坐标**仍然**相对全屏截图，而不是放大图。
 
