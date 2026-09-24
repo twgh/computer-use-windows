@@ -1,7 +1,8 @@
 ---
 name: computer-use-windows
 version: 0.1.1
-description: 顶级 Windows 电脑使用 skill，内置独立 runtime，可自举运行，适配任意支持 MCP 的 agent 客户端，不依赖私有原生模块或提取的应用资产。
+description: 顶级 Windows 电脑使用 skill，内置独立 runtime，可自举运行，适配任意支持 MCP 的 agent 客户端，不依赖私有原生模块或提取的应用资产。当任务需要 Windows 电脑使用能力时，使用本 skill。
+agent_created: false
 tags:
   - skill
   - windows
@@ -12,11 +13,10 @@ tags:
 
 # Windows 电脑使用 Skill 0.1.1
 
-当任务需要一套自带独立 runtime 与 MCP server 的便携式 Windows 电脑使用能力时，使用本 skill。
+当任务需要 Windows 电脑使用能力时，使用本 skill。
 
 ## 本 skill 做什么
 
-- 使用安装目录下自带的 `computer-use-windows` 项目
 - 构建独立 MCP server
 - 首次启动时让 server 自动自举 Python runtime
 - 不依赖任何 agent 客户端的本机二进制、`.node` 模块或提取的应用资产
