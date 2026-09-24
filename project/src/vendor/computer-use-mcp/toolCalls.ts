@@ -2544,25 +2544,42 @@ async function handleType(
   //   2. Unicode text-insertion of '\n' is not a Return key press. URL bars
   //      and terminals ignore it; the model's intent (submit/execute) is lost.
   // CRLF (\r\n) is one grapheme cluster (UAX #29 GB3), so check for it too.
+  //
+  // Consecutive plain graphemes go out as ONE executor call. The per-grapheme
+  // loop predates this host: on the Python bridge every executor call spawns an
+  // interpreter, so a 27-character string cost 7s in process launches alone.
+  // The helper still writes character-by-character with its own 8ms pacing, so
+  // only the cross-process overhead disappears. Special keys stay one call each
+  // — they need a real Return/Tab, not Unicode text insertion.
   const graphemes = segmentGraphemes(text);
+  let pendingPlain = "";
+  const flushPlain = async (): Promise<void> => {
+    if (pendingPlain === "") return;
+    const batch = pendingPlain;
+    pendingPlain = "";
+    await adapter.executor.type(batch, { viaClipboard: false });
+  };
   for (const [i, g] of graphemes.entries()) {
-    // Same abort check as handleComputerBatch. At 8ms/grapheme a 50-char
-    // type() runs ~400ms; this is where an in-flight batch actually
-    // spends its time.
+    // Same abort check as handleComputerBatch. Kept per grapheme on purpose: it
+    // costs no round trip, so a long paste stays interruptible.
     if (overrides.isAborted?.()) {
       return errorResult(
         `Typing aborted after ${i} of ${graphemes.length} graphemes (user interrupt).`,
       );
     }
-    await sleep(INTER_GRAPHEME_SLEEP_MS);
     if (g === "\n" || g === "\r" || g === "\r\n") {
+      await flushPlain();
+      await sleep(INTER_GRAPHEME_SLEEP_MS);
       await adapter.executor.key("return");
     } else if (g === "\t") {
+      await flushPlain();
+      await sleep(INTER_GRAPHEME_SLEEP_MS);
       await adapter.executor.key("tab");
     } else {
-      await adapter.executor.type(g, { viaClipboard: false });
+      pendingPlain += g;
     }
   }
+  await flushPlain();
   return okText(`Typed ${graphemes.length} grapheme(s).`);
 }
 

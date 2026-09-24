@@ -60,7 +60,7 @@ scripts/
 | `COMPUTER_USE_CLIPBOARD_PASTE` | `0` 关闭 | 开启 | 多行 `type` 走剪贴板快路径 |
 | `COMPUTER_USE_CLIPBOARD_GUARD` | `0` 关闭 | 开启 | `click` tier 前台时暂存并清空用户剪贴板 |
 | `COMPUTER_USE_PIXEL_VALIDATION` | `1` 开启 | 关闭 | 点击前 9×9 像素陈旧校验 |
-| `COMPUTER_USE_AUTO_TARGET_DISPLAY` | `0` 关闭 | 开启 | 每次截图前自动定位目标显示器 |
+| `COMPUTER_USE_AUTO_TARGET_DISPLAY` | `0` 关闭 | 开启 | 截图前把目标显示器自动切到「已授权应用窗口所在的那块屏」；模型用 `switch_display` 显式指定时以模型为准 |
 | `COMPUTER_USE_MOUSE_ANIMATION` | `0` 关闭 | 开启 | 指针缓动：按距离计算 pyautogui tween 时长（2000 px/秒，上限 0.5 秒）。每次点击 / 拖拽 / 移动最多增加约 0.5 秒延迟；关闭则光标瞬移 |
 | `COMPUTER_USE_FOCUS_BEFORE_ACTION` | `0` 关闭 | 开启 | 动作前把已授权应用窗口置前（Windows 语义，不隐藏任何窗口）。旧名 `COMPUTER_USE_HIDE_BEFORE_ACTION` 仍被识别：新名未设置时才回退读它 |
 
@@ -116,7 +116,7 @@ scripts/
 | `list_displays` | — | 显示器对象数组，见下 |
 | `get_display_size` | `displayId?` | 单个显示器对象 |
 | `screenshot` | `displayId?`、`targetWidth?`、`targetHeight?` | `{base64, width, height, displayWidth, displayHeight, displayId, originX, originY, display}` |
-| `resolve_prepare_capture` | `preferredDisplayId?`、`targetWidth?`、`targetHeight?` | 同上 + `hidden: []` + `resolvedDisplayId` |
+| `resolve_prepare_capture` | `preferredDisplayId?`、`autoResolve?`、`allowlistBundleIds?`、`targetWidth?`、`targetHeight?` | 同上 + `hidden: []` + `resolvedDisplayId`（`preferredDisplayId` 为空且 `autoResolve` 为真时，按应用窗口所在屏选显示器） |
 | `zoom` | `x`、`y`、`width`、`height`、`targetWidth?`、`targetHeight?` | `{base64, width, height}` |
 | `prepare_for_action` | `allowlistBundleIds` | `[]`（**不隐藏窗口**，只把已授权应用置前） |
 | `preview_hide_set` | — | `[]` |
@@ -169,10 +169,16 @@ scripts/
 - `project/src/computer-use/` 是 **Windows 适配层**：`executor.ts` 用 Python bridge 实现 `ComputerExecutor`；`gates.ts` 从环境变量读门控；`session.ts` 维护会话状态；`pythonBridge.ts` 负责自举与调用；`imageSave.ts` 实现 `save_to_disk` 落盘；`computerUseLock.ts` 管会话锁。
 - DPI：Python 进程在 import 任何 GUI 库**之前**设置 Per-Monitor v2 DPI awareness（失败时回退 shcore level 2 / `SetProcessDPIAware`）。这一步必须在 import 前完成，否则 pyautogui 的初始化会抢先锁定 DPI 模式，导致混合缩放屏上截图与点击坐标不一致。
 
-## 已知实现注意事项
+## Windows 适配要点
 
-- `prepare_for_action` 在 Windows 上不隐藏窗口，只把已授权应用置前（返回空数组）。`COMPUTER_USE_FOCUS_BEFORE_ACTION` 的名字反映这一语义，`focusBeforeAction` 子门控字段同理。
-- `check_permissions` 恒返回已授权，`tcc_not_granted` 分支在 Windows 上是死路径。
-- `resolvePrepareCapture` 的 `autoResolve` 与 `focusBeforeAction` 选项来自 macOS 实现：Windows helper 只使用 `preferredDisplayId` 与目标尺寸，两个布尔值被忽略。
-- `computer-use/appNames.ts` 的路径与名称规则已按 Windows 改写（Program Files / AppData / Steam 白名单，System32 / Winsxs / Installer 黑名单，注册表噪声名称黑名单）。Windows 的 `bundleId` 是规范化后的可执行文件路径，不是 macOS 的 bundle id，因此"始终保留"名单按显示名匹配。
-- 分层的取舍：写盘（`save_to_disk`）由 host 注入回调实现，vendor 层不直接依赖 `node:fs`，与 `cropRawPatch` 的注入方式一致。
+这几条都是实机验证后针对性处理的，改动前请先读原因。
+
+- **窗口归属要穿透 `ApplicationFrameWindow`**（`resolve_window_pid`）。Store 应用的可见窗口是 `ApplicationFrameWindow`，归属进程是 `ApplicationFrameHost.exe` 而非应用自身。不做这一跳，应用能出现在 `list_installed_apps` / `list_running_apps` 里，却没有任何窗口归给它：`find_window_displays` 漏报、`app_under_point` 认错进程、`prepare_for_action` 无法聚焦、前台门控直接拒绝输入 —— 结果就是「授权成功但完全无法操作」。WinUI3 自带窗口的应用（如记事本）不受影响，所以这个问题只在部分 Store 应用上暴露。
+- **stdio 一律 UTF-8**。Python 在 stdout 为管道时按 locale 编码（中文 Windows 是 cp936）输出，而 helper 用 `ensure_ascii=False` 写 JSON：不固定编码时，显示器标签里的 `·`、中文应用名、剪贴板内容都会变成 U+FFFD。调用侧设 `PYTHONIOENCODING=utf-8`，helper 自身也 `reconfigure` 一遍作为兜底。
+- **Win32 调用必须声明 `argtypes` / `restype`**。ctypes 未声明时按 `c_int`（32 位）解析返回值，x64 上会截断 HANDLE —— 曾经把剪贴板句柄截成 `0xFFFFFFFF84DA0810`，`GlobalLock` 直接 access violation。涉及指针返回的剪贴板 / 句柄 API 已显式声明。
+- **`prepare_for_action` 不隐藏窗口**，只把已授权应用置前（返回空数组）。`COMPUTER_USE_FOCUS_BEFORE_ACTION` 的名字反映这一语义，`focusBeforeAction` 子门控字段同理。
+- **`autoResolve` 已实现**：未固定显示器且允许自动解析时，helper 用 `find_window_displays` 选「已授权应用窗口所在的那块屏」。不实现的话默认永远截主屏，`COMPUTER_USE_AUTO_TARGET_DISPLAY` 就是空开关。`focusBeforeAction` 仍是 macOS 选项，helper 忽略。
+- **`type` 按连续文本批量下发**。每个 executor 调用在 Python bridge 上都是一次进程启动，逐字素调用会让 27 字符花掉 7 秒；现在连续的普通字符合并成一次调用（helper 内部仍逐字符 8ms），换行 / 制表符各自单独成键。
+- **`check_permissions` 恒返回已授权**，`tcc_not_granted` 分支在 Windows 上是死路径。
+- **`computer-use/appNames.ts` 已按 Windows 改写**（Program Files / AppData / Steam 白名单，System32 / Winsxs / Installer 黑名单，注册表噪声名称黑名单）。Windows 的 `bundleId` 是规范化后的可执行文件路径，不是 bundle id，因此「始终保留」名单按显示名匹配。注意候选清单只来自注册表，Store 应用（`WindowsApps` 下的包）与只有 App Paths 条目的应用可能缺席 —— 名字仍然可以授权（解析时会并入运行中进程），但清单里看不到。
+- **分层的取舍**：写盘（`save_to_disk`）由 host 注入回调实现，vendor 层不直接依赖 `node:fs`，与 `cropRawPatch` 的注入方式一致。

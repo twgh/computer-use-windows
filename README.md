@@ -1,4 +1,4 @@
-# Windows Computer-Use Skill 0.2.0
+# Windows Computer-Use Skill 0.2.1
 
 ## 项目定位
 
@@ -166,9 +166,11 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 
 ### 已知限制
 
-- `resolvePrepareCapture` 的 `autoResolve` 与 `focusBeforeAction` 选项沿用 macOS 实现：Windows helper 只用 `preferredDisplayId` 与目标尺寸，两个布尔值被忽略。`COMPUTER_USE_AUTO_TARGET_DISPLAY` 仍然控制截图前是否走自动定位路径。
+- `request_access` 描述里的候选应用清单只来自注册表（Uninstall + App Paths），因此存在两类噪声：内部代号（如 `olk`、`msoasb`、`IEDIAGCMD`、`WindowsPackageManagerServer`）会出现在清单里，而 Store 应用（`WindowsApps` 下的包，如计算器）不会出现 —— 后者仍可按显示名授权（解析时会并入运行中进程），但模型看不到名字，只能传可执行文件路径。
+- `resolvePrepareCapture` 的 `focusBeforeAction` 选项沿用 macOS 实现，helper 忽略它；`autoResolve` 已实现（按已授权应用窗口所在屏选显示器）。
 - `check_permissions` 在 Windows 上恒返回已授权，因此 `tcc_not_granted` 分支不会触发。
 - 鼠标缓动（`COMPUTER_USE_MOUSE_ANIMATION`）默认开启，按距离计算时长（2000 px/秒，上限 0.5 秒），因此点击密集的任务每次点击最多多等约 0.5 秒。追求速度可设为 `0`。
+- 截图分辨率由 token 预算决定（长边上限 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。
 
 ### 与 0.1.x 的差异
 
@@ -176,6 +178,19 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - `save_to_disk: true` 现在真的写盘：输出到 `%TEMP%\computer-use-windows\` 并在结果里返回绝对路径。
 - `list_granted_applications` 的返回值新增 `coordinateMode`，与工具描述一致。
 - 删除了 `inputLoader.ts` / `swiftLoader.ts` / `escHotkey.ts` / `drainRunLoop.ts` 四个遗留占位模块（调用即抛错，本 runtime 从未使用）。
+
+### 0.2.1：实机验证中修掉的缺陷
+
+以下五项都是在一台 3 屏 2560x1600 @150% 的真机上跑 MCP 全链路时暴露并修复的：
+
+| 缺陷 | 现象 | 修复 |
+| --- | --- | --- |
+| helper 输出编码 | 显示器标签的 `·`、中文应用名、剪贴板内容变成 U+FFFD（Python 按 cp936 写管道） | 调用侧 `PYTHONIOENCODING=utf-8` + helper 自行 `reconfigure` |
+| 剪贴板崩溃 | `read_clipboard` 报 access violation（x64 HANDLE 被截断成 32 位） | 为剪贴板 / 句柄 API 声明 `argtypes` / `restype` |
+| Store 应用无法驱动 | 计算器能授权却打不开、点不到（窗口归 `ApplicationFrameHost.exe`） | 新增 `resolve_window_pid`，穿透 `ApplicationFrameWindow` 找到宿主进程 |
+| 自动定位显示器空转 | 已授权应用在第 2/3 屏，首张截图却总在主屏 | helper 的 `resolve_prepare_capture` 支持 `autoResolve` + `allowlistBundleIds` |
+| `type` 极慢 | 27 字符耗时 7.1 秒（每个字素启动一次 Python 进程） | 连续普通字符合并为一次调用，同字符串降到 1.1 秒 |
+| `open_application` 重复开窗 | 契约是「带到前台」，实际每次调用都新开一个窗口（验证期间攒出 3 个记事本窗口） | 先按宿主进程匹配已有窗口并聚焦，找不到才启动 |
 
 ## 项目结构
 

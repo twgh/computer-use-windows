@@ -109,6 +109,11 @@ export function createCliExecutor(opts: {
       const [targetW, targetH] = computeTargetDims(display.width, display.height, display.scaleFactor)
       const result = await callPythonHelper<PythonResolvePrepareCaptureResult>('resolve_prepare_capture', {
         preferredDisplayId: opts.preferredDisplayId,
+        // Forwarded so the helper can pick the display the granted apps are on
+        // when nothing is pinned. Without these two the backend had no way to
+        // honor `autoResolve` and always fell back to the primary display.
+        autoResolve: opts.autoResolve,
+        allowlistBundleIds: opts.allowedBundleIds,
         targetWidth: targetW,
         targetHeight: targetH,
         jpegQuality: SCREENSHOT_JPEG_QUALITY,

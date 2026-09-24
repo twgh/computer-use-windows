@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 export function execFileNoThrow(
   file: string,
   args: string[],
-  options: { input?: string; useCwd?: boolean } = {},
+  options: { input?: string; useCwd?: boolean; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise(resolve => {
     const child = execFile(
@@ -13,6 +13,7 @@ export function execFileNoThrow(
         cwd: options.useCwd === false ? undefined : process.cwd(),
         encoding: 'utf8',
         maxBuffer: 32 * 1024 * 1024,
+        ...(options.env ? { env: options.env } : {}),
       },
       (error, stdout, stderr) => {
         const code = typeof (error as NodeJS.ErrnoException | null)?.code === 'number'

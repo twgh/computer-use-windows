@@ -47,8 +47,25 @@ async function pathExists(target: string): Promise<boolean> {
   }
 }
 
+/**
+ * Environment for every Python child process.
+ *
+ * Python encodes a piped stdout with the locale code page — cp936 on a Chinese
+ * Windows install — while the helper writes JSON with `ensure_ascii=False`. The
+ * bridge reads stdout with `encoding: 'utf8'`, so without this every non-ASCII
+ * character (the "·" in display labels, Chinese app display names, clipboard
+ * text) turns into U+FFFD on the way back. Pinning PYTHONIOENCODING is the
+ * targeted fix; the helper also reconfigures its own streams defensively.
+ */
+function pythonEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, PYTHONIOENCODING: 'utf-8' }
+}
+
 async function runOrThrow(file: string, args: string[], label: string): Promise<string> {
-  const { code, stdout, stderr } = await execFileNoThrow(file, args, { useCwd: false })
+  const { code, stdout, stderr } = await execFileNoThrow(file, args, {
+    useCwd: false,
+    env: pythonEnv(),
+  })
   if (code !== 0) {
     throw new Error(`${label} failed with code ${code}: ${stderr || stdout || 'unknown error'}`)
   }
@@ -102,7 +119,7 @@ export async function callPythonHelper<T>(command: string, payload: Record<strin
   const { code, stdout, stderr } = await execFileNoThrow(
     pythonBinPath(),
     [helperPath, command, '--payload', JSON.stringify(payload)],
-    { useCwd: false },
+    { useCwd: false, env: pythonEnv() },
   )
 
   if (code !== 0 && !stdout.trim()) {

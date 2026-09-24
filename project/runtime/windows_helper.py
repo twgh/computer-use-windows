@@ -16,6 +16,20 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+# Emit UTF-8 on stdio no matter how this process was launched. Python encodes a
+# piped stdout with the locale code page (cp936 on a Chinese Windows install),
+# while `json_output` writes with `ensure_ascii=False` — so every non-ASCII
+# character (the "·" in display labels, Chinese app display names, clipboard
+# text) would leave as GBK bytes and be mis-decoded by a UTF-8 reader on the
+# other end. The TypeScript bridge also pins PYTHONIOENCODING; this reconfigure
+# keeps the helper correct for any other launcher too.
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None:
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 # Per-monitor DPI awareness v2 (Win10 1703+) — MUST run before importing
 # pyautogui/pyscreeze: pyautogui calls SetProcessDPIAware() at import time,
 # and the first awareness call wins. PMv2 unifies GetWindowRect,
@@ -129,6 +143,35 @@ user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 advapi32 = ctypes.windll.advapi32
 
+# ctypes defaults an undeclared restype to c_int, i.e. 32 bits. On x64 that
+# silently truncates every HANDLE these calls return (a real clipboard handle
+# came back as 0xFFFFFFFF84DA0810 and GlobalLock died with an access violation).
+# Declare the pointer-returning Win32 entry points explicitly. HGLOBAL is a
+# plain pointer; alias it so the intent reads clearly at each call site.
+HGLOBAL = ctypes.c_void_p
+
+user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+user32.OpenClipboard.restype = ctypes.c_bool
+user32.CloseClipboard.argtypes = []
+user32.CloseClipboard.restype = ctypes.c_bool
+user32.EmptyClipboard.argtypes = []
+user32.EmptyClipboard.restype = ctypes.c_bool
+user32.GetClipboardData.argtypes = [ctypes.c_uint]
+user32.GetClipboardData.restype = HGLOBAL
+user32.SetClipboardData.argtypes = [ctypes.c_uint, HGLOBAL]
+user32.SetClipboardData.restype = HGLOBAL
+
+kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+kernel32.GlobalAlloc.restype = HGLOBAL
+kernel32.GlobalLock.argtypes = [HGLOBAL]
+kernel32.GlobalLock.restype = ctypes.c_void_p
+kernel32.GlobalUnlock.argtypes = [HGLOBAL]
+kernel32.GlobalUnlock.restype = ctypes.c_bool
+kernel32.GlobalFree.argtypes = [HGLOBAL]
+kernel32.GlobalFree.restype = HGLOBAL
+kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+kernel32.CloseHandle.restype = ctypes.c_bool
+
 
 def process_is_elevated(pid: int) -> bool:
     """Whether the process token is elevated (Run as administrator). Best-effort:
@@ -172,7 +215,9 @@ def _ensure_input_can_reach_foreground() -> None:
     hwnd = win32gui.GetForegroundWindow()
     if not hwnd:
         return
-    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+    # resolve_window_pid, not the frame PID: for a Store app the elevation that
+    # matters is the hosted process's, not ApplicationFrameHost's.
+    pid = resolve_window_pid(hwnd)
     if not _SELF_ELEVATED and process_is_elevated(pid):
         raise RuntimeError(
             "The foreground application is running elevated (as administrator). "
@@ -469,6 +514,48 @@ def intersect(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> boo
     return max(ax1, bx1) < min(ax2, bx2) and max(ay1, by1) < min(ay2, by2)
 
 
+APPLICATION_FRAME_CLASS = "ApplicationFrameWindow"
+
+
+def resolve_window_pid(hwnd: int) -> int:
+    """PID of the process that actually owns this window's content.
+
+    Store apps render inside an `ApplicationFrameWindow` owned by
+    ApplicationFrameHost.exe, so the frame's PID is not the app's PID. Without
+    this hop the runtime treats Calculator as "ApplicationFrameHost" forever:
+    the app appears in list_installed_apps/list_running_apps but no window is
+    ever attributed to it, so `find_window_displays` omits it from
+    `request_access.windowLocations`, `app_under_point` names the wrong
+    process, `prepare_for_action` cannot raise it, and the frontmost gate
+    rejects every input action — a granted app that can never be driven.
+
+    The hosted app owns a child window under the frame; the first child whose
+    PID differs from the frame's is the one producing the pixels.
+    """
+    try:
+        _, frame_pid = win32process.GetWindowThreadProcessId(hwnd)
+        if not frame_pid:
+            return 0
+        if win32gui.GetClassName(hwnd) != APPLICATION_FRAME_CLASS:
+            return frame_pid
+        hosted: list[int] = []
+
+        def callback(child: int, _lparam: int) -> bool:
+            _, child_pid = win32process.GetWindowThreadProcessId(child)
+            if child_pid and child_pid != frame_pid:
+                hosted.append(child_pid)
+            return True
+
+        win32gui.EnumChildWindows(hwnd, callback, None)
+        return hosted[0] if hosted else frame_pid
+    except Exception:
+        try:
+            _, fallback_pid = win32process.GetWindowThreadProcessId(hwnd)
+            return fallback_pid
+        except Exception:
+            return 0
+
+
 def enum_windows() -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
 
@@ -485,7 +572,7 @@ def enum_windows() -> list[dict[str, Any]]:
         height = bottom - top
         if width <= 1 or height <= 1:
             return True
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        pid = resolve_window_pid(hwnd)
         process_path = get_process_path(pid)
         windows.append(
             {
@@ -513,7 +600,7 @@ def frontmost_app() -> dict[str, Any] | None:
     hwnd = win32gui.GetForegroundWindow()
     if not hwnd:
         return None
-    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+    pid = resolve_window_pid(hwnd)
     path = get_process_path(pid)
     if not path:
         return None
@@ -529,7 +616,7 @@ def app_under_point(x: int, y: int) -> dict[str, Any] | None:
     hwnd = user32.WindowFromPoint(wintypes.POINT(x, y))
     if hwnd:
         hwnd = win32gui.GetAncestor(hwnd, win32con.GA_ROOT)
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        pid = resolve_window_pid(hwnd)
         path = get_process_path(pid)
         if path:
             return {
@@ -567,6 +654,26 @@ def find_window_displays(bundle_ids: list[str]) -> list[dict[str, Any]]:
                     display_ids.add(int(display["displayId"]))
         result.append({"bundleId": bundle_id, "displayIds": sorted(display_ids)})
     return result
+
+
+def choose_display_for_apps(bundle_ids: list[str]) -> int | None:
+    """Display holding the first allowlisted app that has a window, or None.
+
+    The macOS resolver chases the host window; that machinery does not exist
+    here, so the useful equivalent is "show the model the screen its granted
+    apps are actually on". Without this, `COMPUTER_USE_AUTO_TARGET_DISPLAY` was
+    a no-op and the first screenshot always landed on the primary display even
+    when every granted app lived elsewhere.
+    """
+    try:
+        located = find_window_displays(bundle_ids)
+    except Exception:
+        return None
+    for entry in located:
+        display_ids = entry.get("displayIds") or []
+        if display_ids:
+            return int(display_ids[0])
+    return None
 
 
 def read_reg_value(root, subkey: str, value_name: str) -> str | None:
@@ -681,10 +788,53 @@ def running_apps() -> list[dict[str, Any]]:
     return sorted(results.values(), key=lambda item: item["displayName"].lower())
 
 
+def focus_existing_window(bundle_id: str) -> bool:
+    """Focus a window that already belongs to this app, if there is one.
+
+    `os.startfile` on an .exe launches unconditionally, so every
+    `open_application` call added another window (three calls produced three
+    Notepad windows during verification). The tool's contract is "bring to the
+    front, launching if necessary" — so look for an existing window first.
+
+    Uses resolve_window_pid so Store apps are matched by their real host
+    process rather than ApplicationFrameHost.
+    """
+    wanted = os.path.normcase(bundle_id)
+    found: list[int] = []
+
+    def callback(hwnd: int, _lparam: int) -> bool:
+        if not win32gui.IsWindowVisible(hwnd):
+            return True
+        if not (win32gui.GetWindowText(hwnd) or "").strip():
+            return True
+        path = get_process_path(resolve_window_pid(hwnd))
+        if path and os.path.normcase(path) == wanted:
+            found.append(hwnd)
+        return True
+
+    try:
+        win32gui.EnumWindows(callback, None)
+    except Exception:
+        return False
+    if not found:
+        return False
+    hwnd = found[0]
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, SW_RESTORE)
+            time.sleep(0.05)
+        _force_foreground(hwnd)
+        return True
+    except Exception:
+        return False
+
+
 def open_app(bundle_id: str) -> None:
     target = bundle_id.strip()
     if not target:
         raise RuntimeError("Missing app identifier")
+    if focus_existing_window(target):
+        return
     if os.path.exists(target):
         os.startfile(target)
         return
@@ -943,7 +1093,7 @@ def prepare_for_action(allowlist: list[str]) -> list[str]:
         return []
     hwnd = win32gui.GetForegroundWindow()
     if hwnd:
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        pid = resolve_window_pid(hwnd)
         path = get_process_path(pid)
         if path and os.path.normcase(path) in allow:
             return []  # a granted app is already frontmost
@@ -956,7 +1106,7 @@ def prepare_for_action(allowlist: list[str]) -> list[str]:
             return True  # already hold the topmost visible allowlisted window
         if not win32gui.IsWindowVisible(h):
             return True
-        _, pid = win32process.GetWindowThreadProcessId(h)
+        pid = resolve_window_pid(h)
         path = get_process_path(pid)
         if not path or os.path.normcase(path) not in allow:
             return True
@@ -1008,7 +1158,16 @@ def main() -> int:
             resize = None
             if payload.get("targetWidth") and payload.get("targetHeight"):
                 resize = (int(payload["targetWidth"]), int(payload["targetHeight"]))
-            result = capture_display(payload.get("preferredDisplayId"), resize)
+            # preferredDisplayId wins when set: it carries the model's explicit
+            # switch_display pin or the host's earlier resolution. Only fall back
+            # to app co-location when nothing is pinned AND the caller asked for
+            # auto-resolution (the model has not picked a screen this turn).
+            display_id = payload.get("preferredDisplayId")
+            if display_id is None and payload.get("autoResolve"):
+                display_id = choose_display_for_apps(
+                    list(payload.get("allowlistBundleIds") or [])
+                )
+            result = capture_display(display_id, resize)
             result["hidden"] = []
             result["resolvedDisplayId"] = result["displayId"]
             json_output({"ok": True, "result": result})

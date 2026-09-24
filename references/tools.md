@@ -37,6 +37,7 @@
 }
 ```
 
+- `windowLocations` 列出每个已授权应用窗口所在的显示器；Store 应用也会正确出现（运行时会把窗口还原到真正的宿主进程），可用它决定先 `switch_display` 到哪块屏。
 - 中途可以再次调用以追加应用；已授权的应用保持授权且不会重复出现在 `granted` 中。
 - `denied` 里 `reason: not_installed` 表示名字没解析到已安装应用 —— 换显示名或 bundle id 重试。
 - 走的是「先整体解析、再按优先级剔除」的流程（策略拒绝 > 用户拒绝 > tier），被剔除的应用不会进入授权。
@@ -108,7 +109,7 @@
 
 - 输入到当前获得键盘焦点的位置（不指定目标应用）。
 - 支持换行（`\n` → Enter、`\t` → Tab）与任意 Unicode（中文、全角标点均正常），不经过 IME，与键盘布局无关。
-- 走的是 Unicode `SendInput`，逐字符发送，长文本会比 `write_clipboard` + `ctrl+v` 慢。
+- 走的是 Unicode `SendInput`，逐字符发送，长文本会比 `write_clipboard` + `ctrl+v` 慢。连续普通字符合并在一次调用里下发，换行与制表符则各自拆成独立的按键调用（`\n` 必须是真正的 Enter，不能按文本插入）。
 - 快捷键请改用 `key`。
 
 ### `key`
