@@ -71,8 +71,6 @@ flowchart LR
     I --> L["应用 / 窗口 / 显示器 / 剪贴板"]
 ```
 
-节点标签一律加引号。原因不是美观：mermaid 10.1.0（Typora 内置版本）的词法分析器遇到**未加引号的 `·`（U+00B7 间隔号）**会直接报 `Lexical error ... Unrecognized text.`，而 `/`、`-`、`+`、中文单独都没问题 —— 加引号后 10.1.0 与 12.x 都能渲染。
-
 分层细节见 `references/runtime.md`。
 
 ## 安装与构建
@@ -256,7 +254,6 @@ scripts/
 
 ## 路线图
 
-- 实现 `save_to_disk` 截图落盘
 - 改进 Windows 应用身份识别与图标提取
 - 增加自动化 Windows 集成测试
 - 提供更易分发的本地 release 产物
