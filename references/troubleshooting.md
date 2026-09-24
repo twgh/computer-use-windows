@@ -1,0 +1,114 @@
+# 故障排查
+
+按"症状 → 定位 → 处置"组织。所有路径相对 skill 根目录。
+
+## 一、构建与启动
+
+### `npm run build` 失败
+
+- 确认 Node.js >= 20（`node -v`）。
+- 先 `npm install` 生成 `node_modules`；`dist/` 是构建产物，从 zip 安装的 skill 一定没有它。
+- 类型检查可单独跑：`cd ./project && npm run check`。
+
+### server 启动了但"没有任何输出"
+
+这是正常行为：MCP over stdio，无请求时静默。需要观察内部流程时设置 `COMPUTER_USE_DEBUG=1`，日志会以 `[computer-use]` 前缀写到 **stderr**（stdout 被协议占用，不要往 stdout 打日志）。
+
+### 客户端里看不到任何工具
+
+- `COMPUTER_USE_ENABLED=0` 时 `tools/list` 返回空数组，这是有意设计的 kill switch。检查客户端注入的环境变量。
+- 检查 MCP 配置里的 `args[0]` 是否指向真实存在的 `dist/cli.js` 绝对路径。
+- 用 `COMPUTER_USE_DEBUG=1` 启动，确认打了 `starting stdio MCP server`。
+
+### 改了环境变量没有生效
+
+`COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 在进程启动时读取一次。必须重启 server 进程（多数客户端需要重新加载 MCP 配置）。
+
+## 二、Python 自举
+
+首次调用工具时会创建 `project/.runtime/venv` 并安装依赖，这一步失败会以 `executor_threw` 形式暴露为工具错误。
+
+### `venv creation` 失败
+
+- 系统里没有可用的 Python：确认 `py -3 --version` 或 `python --version` 能跑通。
+- Windows 上会先试 `py -3 -m venv`，失败回退 `python -m venv`。两者都不可用时安装 Python 3 并确保在 PATH 中。
+
+### 依赖安装失败
+
+- 多为网络问题（首次要拉 `mss` / `Pillow` / `pyautogui` / `psutil` / `pywin32`）。网络恢复后**重试即可** —— 自举 promise 在失败时会被清空，允许重新触发。
+- 安全软件拦截写入 venv 目录时，把 `project/.runtime/` 加入白名单。
+- 强制重装：删除 `project/.runtime/venv` 与 `project/.runtime/requirements.sha256`，下次调用重新自举。
+- 依赖版本变化时（`requirements.txt` 内容变了导致 SHA-256 不匹配）会自动重装，无需手工干预。
+
+### 每次调用都很慢
+
+正常现象：一次工具调用 = 一个短命 Python 进程（起解释器 + import numpy/Pillow/pywin32 等）。把可预测的连续动作合并进 `computer_batch` 能显著减少总耗时。
+
+## 三、门控类错误
+
+| 错误 | 原因 | 处置 |
+| --- | --- | --- |
+| `allowlist_empty` | 还没申请任何应用 | 先调 `request_access` |
+| `app_not_granted` | 前台应用不在白名单 | 补一次 `request_access` 把该应用加入；或先 `open_application` 把已授权应用置前 |
+| `tier_insufficient` | 应用已授权但档位不足（对 `click` tier 的应用发键盘输入 / 右键） | 换用同档位允许的动作，或换目标应用；**不要**试图绕开门控（不要用 `open_application`、shell、脚本等方式代替受控输入） |
+| `grant_flag_required` | 缺少 `clipboardRead` / `clipboardWrite` / `systemKeyCombos` | 重新 `request_access` 并显式带上对应 flag |
+| `bad_args` | 参数非法；常见于 `switch_display` 传了不存在的显示器名 | 读错误信息里列出的可用显示器名，原样重传 |
+| `state_conflict` | 调用顺序问题，如左键已按下时再次 `left_mouse_down` | 先 `left_mouse_up` 复位状态 |
+| `cu_lock_held` | 桌面被另一个 computer-use 会话占用 | 等待对方结束。若确认持有者已崩溃，可删除 `~/.computer-use-windows/computer-use.lock` |
+| `display_error` | 显示器枚举失败（热插拔瞬间等） | 稍后重试 |
+| `feature_unavailable` | 会话未接线该能力 | 重启 server |
+
+被拦截的系统级组合键（需 `systemKeyCombos` 授权才可能通过）：`ctrl+alt+delete`、`alt+f4`、`alt+tab`、`win+l`、`win+d`。
+
+## 四、输入不生效
+
+### 报错提示管理员权限 / 输入被丢弃
+
+目标窗口以管理员权限运行，而 runtime 未提权，Windows UIPI 会拦截输入注入，helper 会显式报错。处置：以管理员身份运行 runtime（宿主进程提权），或改操作非提权窗口。截屏与窗口管理不受影响。
+
+可用 `frontmost_app` / `app_under_point`（helper 层）查看 `elevated` 与 `selfElevated` 判断是否为提权边界问题。
+
+### 输入落到了错误的窗口
+
+- 输入工具作用于**当前前台**窗口。先 `open_application` 把目标应用带到前台，必要时先 `left_click` 点进具体输入控件。
+- 运行时不隐藏窗口，其他窗口可能挡在目标之上；多屏场景先确认截的是哪块屏（`screenshot` 的说明文本 + `switch_display`）。
+
+### 中文 / 全角标点输入异常
+
+`type` 走 Unicode SendInput，与 IME、键盘布局无关，中文与全角标点应完整输入。若仍异常，确认没有把文本拆成 `key` 组合键来发（`key` 只适合按键与快捷键，不适合文本）。
+
+### 剪贴板"丢了"
+
+当前台应用是 `click` tier 时，runtime 会暂存并清空用户剪贴板（防止通过界面"粘贴"按钮绕过键盘档位限制），离开该档位前台后自动恢复。这是预期行为。可用 `COMPUTER_USE_CLIPBOARD_GUARD=0` 关闭，但不建议。
+
+## 五、点击落点不准
+
+按可能性排序：
+
+1. **没有先截图**。`pixels` 模式下坐标是"最近一张截图的图像像素"，无截图时只能退化为按缩放比粗略换算，会输出 warn 日志。先 `screenshot` 再点。
+2. **坐标模式不匹配**。客户端配置的 `COMPUTER_USE_COORDINATE_MODE` 必须与 agent 给出的坐标语义一致；`pixels` 与 `normalized_0_100` 混用会系统性偏移。
+3. **把 `zoom` 的放大图当成了坐标基准**。放大图仅用于观察，点击始终以全屏截图为基准。
+4. **自己做了换算**。不要用分辨率 / 缩放比自行推导坐标，直接读截图图像像素交给 server。
+5. **截图后显示器设置发生变化**。换算使用截图时刻的几何快照，重新截图即可。
+6. **目标在另一块屏**。先 `switch_display` 再截图，坐标才落在同一坐标系内。
+
+## 六、截图相关问题
+
+- **黑屏或缺少内容**：独占全屏（部分游戏）、DRM 保护的播放内容、UAC 安全桌面下无法采集。
+- **颜色异常**：HDR 显示器上采集可能偏色；需要精确颜色判读时建议先在 SDR 模式下操作。
+- **显示器编号对不上 Windows 设置**：内部编号与系统编号来源不同。跨端沟通时用"型号 / 分辨率 / 缩放 / 左右上下方位"描述，不要用编号。
+- **看到不该出现的窗口**：本 runtime 上报 `screenshotFiltering: none`，截图不过滤非白名单窗口。这是设计如此，动作门控在 MCP 层而非 compositor 层。
+- **多屏时截图带有说明文本但只列出部分屏幕**：说明文本只在显示器 ≥ 2 块且（首次截图或目标屏变化）时出现，属预期行为。
+
+## 七、重置与清理
+
+- 重建 Python 环境：删除 `project/.runtime/venv` 与 `project/.runtime/requirements.sha256`。
+- 释放卡住的会话锁：删除 `~/.computer-use-windows/computer-use.lock`（确认无活动会话后再删）。
+- 重新构建：`cd ./project && npm install && npm run build`。
+- 打包分发：`cd ./scripts && python package_skill.py`，产物为 `computer-use-windows.zip`（不含 `dist/`、`node_modules/`、`.runtime/`、`README.md`、`LICENSE`、`scripts/` —— 因此安装方必须自行构建，见 `SKILL.md`「准备 runtime」）。
+
+## 八、排查时的硬性约束
+
+- 不要在 skill 或 project 目录内创建临时文件（截图、JSON dump、日志、测试输出）。需要落盘时写入 `%TEMP%`，用完删除。
+- 不要为了绕过门控去调用 `open_application` 之外的手段模拟输入（shell、脚本、其他自动化库）。
+- 不要把 `COMPUTER_USE_ENABLED=0` 当作"修复"手段长期保留；它是紧急开关，会让整个 server 不可用。
