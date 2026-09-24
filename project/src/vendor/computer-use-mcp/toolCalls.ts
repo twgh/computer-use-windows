@@ -1114,7 +1114,24 @@ async function buildAccessRequest(
 ): Promise<AccessRequestParts> {
   const alreadyGranted = new Set(allowedApps.map((g) => g.bundleId));
   const installed = await adapter.executor.listInstalledApps();
-  const resolved = resolveRequestedApps(apps, installed, alreadyGranted);
+  // Merge running apps into the resolution candidates. Windows portable apps
+  // (no uninstall-registry entry) are invisible to listInstalledApps but do
+  // appear in listRunningApps while they are actually usable.
+  let candidates = installed;
+  try {
+    const running = await adapter.executor.listRunningApps();
+    const seen = new Set(installed.map((a) => a.bundleId));
+    const extra = running.filter((a) => !seen.has(a.bundleId));
+    if (extra.length > 0) {
+      candidates = [
+        ...installed,
+        ...extra.map((a) => ({ ...a, path: (a as { path?: string }).path ?? a.bundleId })),
+      ];
+    }
+  } catch {
+    // listRunningApps is best-effort — resolution falls back to installed only.
+  }
+  const resolved = resolveRequestedApps(apps, candidates, alreadyGranted);
 
   // Policy-level auto-deny (baked-in, not user-configurable). Stripped
   // before userDenied — checks bundle ID AND display name (covers
