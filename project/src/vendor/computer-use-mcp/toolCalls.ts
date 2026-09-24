@@ -4,9 +4,10 @@
  *
  * Enforcement order, every call:
  *   1. Kill switch (`adapter.isDisabled()`).
- *   2. TCC gate (`adapter.ensureOsPermissions()`). `request_access` is
- *      exempted — it threads the ungranted state to the renderer so the
- *      user can grant TCC perms from inside the approval dialog.
+ *   2. OS-permission gate (`adapter.ensureOsPermissions()`). `request_access`
+ *      is exempted — it threads the ungranted state to the renderer so the
+ *      user can grant TCC perms from inside the approval dialog. (macOS
+ *      concept: on Windows the host always reports granted.)
  *   3. Tool-specific gates (see dispatch table) — ANY exception in a gate
  *      returns a tool error, executor never called.
  *   4. Executor call.
@@ -75,6 +76,8 @@ const FINDER_BUNDLE_ID = "com.apple.finder";
  */
 export type CuErrorKind =
   | "allowlist_empty"
+  /** OS permission missing. macOS-only in practice: the Windows host answers a
+   *  constant "granted", so it never emits this (see Gate 2). */
   | "tcc_not_granted"
   | "cu_lock_held"
   | "teach_mode_conflict"
@@ -837,6 +840,29 @@ function resolveRequestedApps(
 // Individual tool handlers
 // ---------------------------------------------------------------------------
 
+/**
+ * Platform-neutral names for the two OS-permission booleans.
+ *
+ * The macOS host maps these onto its System Settings panes ("Accessibility",
+ * "Screen Recording"). This runtime never populates them at all — Gate 2 always
+ * passes, see its comment — so the wording must not send a Windows user chasing
+ * a permission that does not exist on their platform.
+ */
+const OS_PERMISSION_LABELS = {
+  accessibility: "input control",
+  screenRecording: "screen capture",
+} as const;
+
+function describeMissingOsPermissions(state: {
+  accessibility?: boolean;
+  screenRecording?: boolean;
+}): string {
+  const missing: string[] = [];
+  if (!state.accessibility) missing.push(OS_PERMISSION_LABELS.accessibility);
+  if (!state.screenRecording) missing.push(OS_PERMISSION_LABELS.screenRecording);
+  return missing.join(" and ");
+}
+
 async function handleRequestAccess(
   adapter: ComputerUseHostAdapter,
   args: Record<string, unknown>,
@@ -891,19 +917,14 @@ async function handleRequestAccess(
     const recheck = await adapter.ensureOsPermissions();
     if (recheck.granted) {
       return errorResult(
-        "Windows Accessibility and Screen Recording are now both granted. " +
-          "Call request_access again immediately — the next call will show " +
-          "the app selection list.",
+        "The required OS-level permissions are now granted. Call request_access " +
+          "again immediately — the next call will show the app selection list.",
       );
     }
 
-    const missing: string[] = [];
-    if (!recheck.accessibility) missing.push("Accessibility");
-    if (!recheck.screenRecording) missing.push("Screen Recording");
     return errorResult(
-      `Windows ${missing.join(" and ")} permission(s) not yet granted. ` +
-        `The permission panel has been shown. Once the user grants the ` +
-        `missing permission(s), call request_access again.`,
+      `OS-level permission still missing: ${describeMissingOsPermissions(recheck)}. ` +
+        `The approval dialog has surfaced it; once granted, call request_access again.`,
       "tcc_not_granted",
     );
   }
@@ -1424,19 +1445,16 @@ async function handleRequestTeachAccess(
     const recheck = await adapter.ensureOsPermissions();
     if (recheck.granted) {
       return errorResult(
-        "Windows Accessibility and Screen Recording are now both granted. " +
-          "Call request_teach_access again immediately — the next call will " +
-          "show the app selection list.",
+        "The required OS-level permissions are now granted. Call " +
+          "request_teach_access again immediately — the next call will show " +
+          "the app selection list.",
       );
     }
 
-    const missing: string[] = [];
-    if (!recheck.accessibility) missing.push("Accessibility");
-    if (!recheck.screenRecording) missing.push("Screen Recording");
     return errorResult(
-      `Windows ${missing.join(" and ")} permission(s) not yet granted. ` +
-        `The permission panel has been shown. Once the user grants the ` +
-        `missing permission(s), call request_teach_access again.`,
+      `OS-level permission still missing: ${describeMissingOsPermissions(recheck)}. ` +
+        `The approval dialog has surfaced it; once granted, call ` +
+        `request_teach_access again.`,
       "tcc_not_granted",
     );
   }
@@ -3615,11 +3633,19 @@ export async function handleToolCall(
     );
   }
 
-  // ─── Gate 2: TCC ─────────────────────────────────────────────────────
-  // Accessibility + Screen Recording on Windows. Pure check — no dialog,
-  // no relaunch. `request_access` is exempted: it threads the ungranted
-  // state through to the renderer, which shows a TCC toggle panel instead
-  // of the app list. Every other tool short-circuits here.
+  // ─── Gate 2: OS-level permissions ────────────────────────────────────
+  // Platform hook, ported from the macOS host where it is the TCC check
+  // (Accessibility + Screen Recording). Pure check — no dialog, no relaunch.
+  // `request_access` is exempted: it threads the ungranted state through to the
+  // renderer, which shows a permission panel instead of the app list. Every
+  // other tool short-circuits here.
+  //
+  // UNREACHABLE ON THIS RUNTIME. The Windows host answers a constant "granted"
+  // (no TCC equivalent exists), and memoizes it — see hostAdapter.ts. So on
+  // Windows `tcc_not_granted` is never emitted and `tccState` never reaches a
+  // request. The branch is kept because it is the right seam for the Windows
+  // preconditions that DO exist (session 0 / no interactive desktop, RDP
+  // disconnected, UAC secure desktop); deleting it would mean rebuilding it.
   const osPerms = await adapter.ensureOsPermissions();
   let tccState:
     | { accessibility: boolean; screenRecording: boolean }
@@ -3629,8 +3655,8 @@ export async function handleToolCall(
     // TCC toggle panel. Every other tool short-circuits.
     if (name !== "request_access" && name !== "request_teach_access") {
       return errorResult(
-        "Accessibility and Screen Recording permissions are required. " +
-          "Call request_access to show the permission panel.",
+        "The runtime is missing an OS-level permission it needs to see or " +
+          "control the screen. Call request_access to surface it.",
         "tcc_not_granted",
       );
     }

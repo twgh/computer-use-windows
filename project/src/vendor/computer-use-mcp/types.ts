@@ -178,12 +178,15 @@ export interface CuPermissionRequest {
    */
   screenshotFiltering: "native" | "none";
   /**
-   * Present only when TCC permissions are NOT yet granted. When present,
+   * Present only when the OS permissions are NOT yet granted. When present,
    * the renderer shows a TCC toggle panel (two rows: Accessibility, Screen
    * Recording) INSTEAD OF the app list. Clicking a row's "Request" button
    * triggers the OS prompt; the store polls on window-focus and flips the
-   * toggle when the grant is detected. Windows itself prompts the user to
+   * toggle when the grant is detected. macOS itself prompts the user to
    * restart after granting Screen Recording — we don't.
+   *
+   * Never populated on the Windows host: its permission check is a constant
+   * `granted`, so this panel can never render there.
    */
   tccState?: {
     accessibility: boolean;
@@ -243,10 +246,15 @@ export interface ComputerUseHostAdapter {
   executor: ComputerExecutor;
 
   /**
-   * TCC state check — Accessibility + Screen Recording on Windows. Pure check,
-   * no dialog, no relaunch. When either is missing, `request_access` threads
-   * the state through to the renderer which shows a toggle panel; all other
-   * tools return a tool error.
+   * OS-permission check — the macOS host's TCC state (Accessibility + Screen
+   * Recording). Pure check, no dialog, no relaunch. When either is missing,
+   * `request_access` threads the state through to the renderer which shows a
+   * toggle panel; all other tools return a tool error.
+   *
+   * The Windows host has no such permission to report and answers a constant
+   * `{granted: true}`, memoized for the process lifetime (each call is a Python
+   * spawn otherwise). So on Windows this gate always passes — see Gate 2 in
+   * `toolCalls.ts` for why the branch is kept anyway.
    */
   ensureOsPermissions(): Promise<
     { granted: boolean; accessibility?: boolean; screenRecording?: boolean }
@@ -646,7 +654,8 @@ export interface CuTeachPermissionRequest {
   reason: string;
   apps: ResolvedAppRequest[];
   screenshotFiltering: "native" | "none";
-  /** Present only when TCC is ungranted — same semantics as `CuPermissionRequest.tccState`. */
+  /** Present only when the OS permissions are ungranted — same semantics as
+   *  `CuPermissionRequest.tccState`, including "never on Windows". */
   tccState?: {
     accessibility: boolean;
     screenRecording: boolean;

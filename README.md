@@ -1,4 +1,4 @@
-# Windows Computer-Use Skill 0.4.1
+# Windows Computer-Use Skill 0.4.2
 
 ## 项目定位
 
@@ -230,6 +230,21 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - **移除 `COMPUTER_USE_HIDE_BEFORE_ACTION` 旧名兼容**。技能尚未发布，不存在需要兼容的存量配置 —— 留着一个永远不会被读到的名字只会在环境变量表里误导人。
 - 文档新增**落点校验（hit-test）**一节：所有鼠标落点类工具在注入输入前会检查目标坐标下的应用，不在白名单或档位不足都会拒绝执行。
 - 修掉架构图在 Typora 里的 `Lexical error`：mermaid 10.1.0 的词法分析器不接受**未加引号的 `·`**，节点标签一律加引号即可（`/`、`-`、`+`、中文各自都没问题，是 `·` 触发的）。
+
+### 0.4.2：权限检查不再每次工具调用都问一遍
+
+vendored 框架的 Gate 2 会在**每次工具调用**前查询 OS 权限。macOS 上这是真的 TCC 检查；Windows 上没有 TCC 可问，helper 返回常量 `{accessibility: true, screenRecording: true}` —— 但这一次"询问"是一个完整的 Python 进程：
+
+```
+check_permissions 实测 5 次: 246 / 221 / 220 / 238 / 221 ms   → 均值 229ms
+一次 wait 工具调用: 294ms  ← 几乎全部花在这个检查上
+```
+
+于是把它**记忆化为每进程一次**，每次工具调用省下约 230ms（约 20% 延迟；`left_click` 实测 1475ms → 1240ms）。失败不缓存，瞬时进程错误不会把会话永久钉在"权限缺失"状态。
+
+同时清理了这个不可达分支上的谎话：报错原文是 `"Windows Accessibility and Screen Recording are now both granted."` —— macOS 词汇前直接拼了平台名，而 Windows 上既没有这两个权限，也没有那个面板。现在改为平台中立措辞（`input control` / `screen capture`），并在 Gate 2、`tcc_not_granted`、`tccState` 三处标注"Windows 上不可达"。
+
+分支**没有删除**，因为它是"平台前置条件"的正确接缝 —— Windows 上真实存在的是另一组问题：**会话 0 / 无交互桌面、RDP 断开、UAC 安全桌面**。代码里写明了：若把这些接进来，必须同时移除记忆化（那些状态会在运行期间变化）。
 
 ## 项目结构
 

@@ -202,7 +202,7 @@ scripts/
 - **`prepare_for_action` 不隐藏窗口**，只把已授权应用置前（返回空数组）。`COMPUTER_USE_FOCUS_BEFORE_ACTION` 的名字反映这一语义，`focusBeforeAction` 子门控字段同理。注意：由于窗口不会被隐藏，**原子截图路径（`autoTargetDisplay` 开启，默认）不执行这一步** —— 在截图前把某个已授权窗口提到前台只会遮挡模型正在看的内容，而输入动作会自己调用它。这是与 macOS（隐藏非授权窗口、使截图更"真实"）的有意差异。
 - **`autoResolve` 已实现**：未固定显示器且允许自动解析时，helper 用 `find_window_displays` 选「已授权应用窗口所在的那块屏」。不实现的话默认永远截主屏，`COMPUTER_USE_AUTO_TARGET_DISPLAY` 就是空开关。`focusBeforeAction` 仍是 macOS 选项，helper 忽略。
 - **`type` 按连续文本批量下发**。每个 executor 调用在 Python bridge 上都是一次进程启动，逐字素调用会让 27 字符花掉 7 秒；现在连续的普通字符合并成一次调用（helper 内部仍逐字符 8ms），换行 / 制表符各自单独成键。
-- **`check_permissions` 恒返回已授权**，`tcc_not_granted` 分支在 Windows 上是死路径。
+- **`check_permissions` 恒返回已授权，且结果被记忆化。** vendored 框架的 Gate 2 会在**每次工具调用**前问一次 OS 权限，而 Windows 后端没有 TCC 可问 —— helper 返回常量 `{accessibility: true, screenRecording: true}`。这一次询问是完整的 Python 进程（实测 229ms，一次 `wait` 调用几乎全部时间都花在这里），所以 adapter 把它记忆化为每进程一次，省掉约 20% 的单次调用延迟。因此 `tcc_not_granted` 在 Windows 上永不触发、`tccState` 永不填充，该分支保留作为平台接缝；**若将来接入真实前置条件（会话 0 / 无交互桌面、RDP 断开、UAC 安全桌面），必须移除记忆化**（那些状态会在进程运行期间变化）。
 - **候选清单 = 注册表安装项 ∪ 有可见窗口的进程**（`list_window_apps`，`source/computer-use/windowApps.ts`）。注册表给不出 Store 应用的可读名称（计算器在 `WindowsApps` 下，既无 Uninstall 条目也无 App Paths 条目），而可见窗口是「用户能指认的应用」的最强信号。窗口来源的条目带 `origin: 'window'`：跳过安装路径白名单（便携应用可能在 `D:\appsd\` 这类任意目录），但仍要过名称黑名单。
 - **显示名优先取 exe 版本资源**（`file_description`，按路径缓存）。只作用于 App Paths 分支与 `display_name_from_path`，不覆盖 Uninstall 的 `DisplayName` —— 后者已是本地化用户可见名，覆盖后反而变差。
 - **`computer-use/appNames.ts` 的路径规则**：Program Files / AppData / Steam 白名单，System32 / Winsxs / Installer 黑名单，外加注册表与 Windows 组件噪声名称黑名单。Windows 的 `bundleId` 是规范化后的可执行文件路径，不是 bundle id，因此「始终保留」名单按显示名匹配。

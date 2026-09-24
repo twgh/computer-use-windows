@@ -14,6 +14,45 @@ class DebugLogger implements Logger {
   error(message: string, ...args: unknown[]): void { logWarn(format(message, ...args)) }
 }
 
+type OsPermissions = {
+  granted: boolean
+  accessibility?: boolean
+  screenRecording?: boolean
+}
+
+let memoizedOsPermissions: Promise<OsPermissions> | undefined
+
+/**
+ * OS-permission check, memoized for the process lifetime.
+ *
+ * The Windows helper has nothing to ask about — `check_permissions` returns a
+ * constant `{accessibility: true, screenRecording: true}`, because there is no
+ * TCC equivalent here. But the vendored Gate 2 awaits this on EVERY tool call,
+ * and each await is a fresh Python process (measured 229ms; a bare `wait` tool
+ * call is 294ms, essentially all permission check). Memoizing removes ~20% of
+ * the latency of every tool call.
+ *
+ * If a real precondition is ever wired in here — session 0 / no interactive
+ * desktop, RDP disconnected, UAC secure desktop — DROP THIS MEMO: those change
+ * while the server runs, unlike the constant answered today.
+ */
+function ensureOsPermissions(): Promise<OsPermissions> {
+  memoizedOsPermissions ??= (async () => {
+    try {
+      const perms = await callPythonHelper<{ accessibility: boolean; screenRecording: boolean }>('check_permissions', {})
+      return perms.accessibility && perms.screenRecording
+        ? { granted: true as const }
+        : { granted: false as const, accessibility: perms.accessibility, screenRecording: perms.screenRecording }
+    } catch (error) {
+      // Never cache a failure: a transient spawn error must not pin the session
+      // into "permissions missing" for its whole life.
+      memoizedOsPermissions = undefined
+      throw error
+    }
+  })()
+  return memoizedOsPermissions
+}
+
 let cached: ComputerUseHostAdapter | undefined
 
 export function getComputerUseHostAdapter(): ComputerUseHostAdapter {
@@ -24,12 +63,7 @@ export function getComputerUseHostAdapter(): ComputerUseHostAdapter {
     executor: createCliExecutor({
       getMouseAnimationEnabled: () => getChicagoSubGates().mouseAnimation,
     }),
-    ensureOsPermissions: async () => {
-      const perms = await callPythonHelper<{ accessibility: boolean; screenRecording: boolean }>('check_permissions', {})
-      return perms.accessibility && perms.screenRecording
-        ? { granted: true as const }
-        : { granted: false as const, accessibility: perms.accessibility, screenRecording: perms.screenRecording }
-    },
+    ensureOsPermissions,
     isDisabled: () => !getChicagoEnabled(),
     getSubGates: getChicagoSubGates,
     getAutoUnhideEnabled: () => true,
