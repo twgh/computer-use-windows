@@ -975,9 +975,9 @@ def check_permissions() -> dict[str, bool]:
 # Distance-proportional pointer glide, mirroring the macOS backend's
 # ease-out-cubic motion: 2000 px/sec, capped at 500 ms so a cross-screen jump
 # never blocks a tool call longer than that. Gated by
-# COMPUTER_USE_MOUSE_ANIMATION (on by default). Disabled → the cursor teleports,
-# which is faster but can miss hover-only affordances: a widget that reacts to
-# the pointer path never sees one.
+# COMPUTER_USE_MOUSE_ANIMATION, which is OPT-IN (=1 enables; off by default):
+# teleporting is faster, and only apps that watch the pointer path — hover-only
+# menus, motion-sensitive drop targets — need the glide.
 GLIDE_PX_PER_SEC = 2000.0
 GLIDE_MAX_SECONDS = 0.5
 GLIDE_MIN_SECONDS = 0.01

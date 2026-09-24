@@ -99,6 +99,23 @@
 - `left_mouse_down` / `left_mouse_up`：无参数，作用于当前光标位置。先 `mouse_move` 定位。`left_mouse_down` 在按键已处于按下状态时返回 `state_conflict`；`left_mouse_up` 在未按下时调用是安全的。
 - `cursor_position`：无参数。返回相对最近一张截图的图像像素坐标（尚未截图时按逻辑点返回）。
 
+### 落点校验（hit-test）
+
+**所有鼠标落点类工具在注入输入之前都会检查目标坐标下是哪个应用**（5 种点击、`scroll`、`left_click_drag` 的起点与终点、`mouse_move`、`left_mouse_down` / `left_mouse_up`）。顺序是：坐标换算 → 落点校验 → 真正注入。
+
+1. 目标应用**不在白名单** → 拒绝执行，返回 `app_not_granted`：
+
+   ```
+   Click at these coordinates would land on "Windows 资源管理器", which is not in the allowed applications. Take a fresh screenshot to see the current window layout.
+   ```
+
+2. 目标应用在白名单但档位不够 → 拒绝执行，返回 `tier_insufficient`（例如右键点在一个 `click` 档应用上：右键菜单可以"粘贴"，等同键盘注入，所以需要 `full`）。
+3. 目标应用是 `click` 档且剪贴板看护开启 → **点击前**先暂存并清空剪贴板，堵住"点非前台 click 档窗口的粘贴按钮"这条绕过路径。
+
+这比"只看前台窗口"更严：前台是已授权应用、而落点压在另一个应用上时，同样会被拦下。命中 `app_not_granted` 时应**重新截图确认布局**，或为落点上的那个应用补一次 `request_access` —— 不要换个坐标硬试。
+
+Windows 特例：桌面窗口归属 `explorer.exe`（显示名可能是「Windows 资源管理器」），它不在 macOS 的 Finder 豁免名单里，因此**点在桌面上会被拒绝**，除非把「Windows 资源管理器」也授权（它本身会出现在 `request_access` 的候选清单中）。`app_under_point` 在坐标下方没有窗口时会回退为前台应用。
+
 ## 键盘
 
 ### `type`

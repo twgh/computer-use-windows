@@ -24,9 +24,7 @@
 
 `COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 在进程启动时读取一次。必须重启 server 进程（多数客户端需要重新加载 MCP 配置）。
 
-子开关（`COMPUTER_USE_MOUSE_ANIMATION`、`COMPUTER_USE_FOCUS_BEFORE_ACTION`、`COMPUTER_USE_CLIPBOARD_GUARD` 等）每次工具调用重新读取，改动即时生效。
-
-其中 `COMPUTER_USE_FOCUS_BEFORE_ACTION` 带旧名兼容：新名**优先**，只有在新名完全未设置时才回退读取已废弃的 `COMPUTER_USE_HIDE_BEFORE_ACTION`。所以旧配置（只写旧名）无需修改即可继续工作，而新名一旦出现就完全接管。若两个都写了，以新名为准。
+子开关（`COMPUTER_USE_MOUSE_ANIMATION`、`COMPUTER_USE_FOCUS_BEFORE_ACTION`、`COMPUTER_USE_CLIPBOARD_GUARD`、图像预算等）每次工具调用重新读取，改动即时生效，无需重启。
 
 ## 二、Python 自举
 

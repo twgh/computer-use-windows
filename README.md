@@ -1,4 +1,4 @@
-# Windows Computer-Use Skill 0.4.0
+# Windows Computer-Use Skill 0.4.1
 
 ## 项目定位
 
@@ -57,19 +57,21 @@
 
 ```mermaid
 flowchart LR
-    A[Agent / MCP Client] --> B[computer-use-windows]
-    B --> C[TS MCP 工具层 · vendor/computer-use-mcp]
-    B --> D[Windows 适配层 · computer-use]
+    A["Agent / MCP Client"] --> B["computer-use-windows"]
+    B --> C["TS MCP 工具层 · vendor/computer-use-mcp"]
+    B --> D["Windows 适配层 · computer-use"]
     C --> D
-    D --> E[Python bridge · 自举 + 调用]
-    E --> F[windows_helper.py]
-    F --> G[pyautogui]
-    F --> H[mss + Pillow]
-    F --> I[psutil + pywin32]
-    G --> J[鼠标 / 键盘]
-    H --> K[截图]
-    I --> L[应用 / 窗口 / 显示器 / 剪贴板]
+    D --> E["Python bridge · 自举 + 调用"]
+    E --> F["windows_helper.py"]
+    F --> G["pyautogui"]
+    F --> H["mss + Pillow"]
+    F --> I["psutil + pywin32"]
+    G --> J["鼠标 / 键盘"]
+    H --> K["截图"]
+    I --> L["应用 / 窗口 / 显示器 / 剪贴板"]
 ```
+
+节点标签一律加引号。原因不是美观：mermaid 10.1.0（Typora 内置版本）的词法分析器遇到**未加引号的 `·`（U+00B7 间隔号）**会直接报 `Lexical error ... Unrecognized text.`，而 `/`、`-`、`+`、中文单独都没问题 —— 加引号后 10.1.0 与 12.x 都能渲染。
 
 分层细节见 `references/runtime.md`。
 
@@ -169,12 +171,12 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - `request_access` 的候选应用清单是「注册表安装项 ∪ 当前有可见窗口的进程」，上限 50 个（超出会附 `... and N more`）。少数条目仍是不易读的文件名（如 `mspaint`、`store`、`devenv`），因为对应可执行文件没有版本资源可读。
 - `resolvePrepareCapture` 的 `focusBeforeAction` 选项沿用 macOS 实现，helper 忽略它；`autoResolve` 已实现（按已授权应用窗口所在屏选显示器）。
 - `check_permissions` 在 Windows 上恒返回已授权，因此 `tcc_not_granted` 分支不会触发。
-- 鼠标缓动（`COMPUTER_USE_MOUSE_ANIMATION`）默认开启，按距离计算时长（2000 px/秒，上限 0.5 秒），因此点击密集的任务每次点击最多多等约 0.5 秒。追求速度可设为 `0`。
+- 鼠标缓动默认**关闭**（光标瞬移）。只有少数需要"真实指针轨迹"的软件才值得开：`COMPUTER_USE_MOUSE_ANIMATION=1` 会按距离计算时长（2000 px/秒，上限 0.5 秒），代价是每次点击 / 拖拽 / 移动最多多等约 0.5 秒。
 - 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 0.4.0 一节的前提说明。
 
 ### 与 0.1.x 的差异
 
-- `COMPUTER_USE_HIDE_BEFORE_ACTION` 更名为 `COMPUTER_USE_FOCUS_BEFORE_ACTION`（Windows 侧从不隐藏窗口）。旧名仍被识别，仅在新名未设置时作为回退生效。
+- `COMPUTER_USE_HIDE_BEFORE_ACTION` 更名为 `COMPUTER_USE_FOCUS_BEFORE_ACTION`（Windows 侧从不隐藏窗口）。旧名不再保留 —— 技能尚未发布，不存在需要兼容的存量配置。
 - `save_to_disk: true` 现在真的写盘：输出到 `%TEMP%\computer-use-windows\` 并在结果里返回绝对路径。
 - `list_granted_applications` 的返回值新增 `coordinateMode`，与工具描述一致。
 - 删除了 `inputLoader.ts` / `swiftLoader.ts` / `escHotkey.ts` / `drainRunLoop.ts` 四个遗留占位模块（调用即抛错，本 runtime 从未使用）。
@@ -223,6 +225,13 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 `native` 表示不做预处理、直接发原始截图。**仅在消费方模型确实接受更大的图时才有意义**（本地 VLM，或 tiling 参数不同的服务）；否则图会在到达时被重新缩放，模型按更大的图读数取坐标，而我们报告的尺寸更小，点击反而更不准 —— 覆盖默认值时启动会打印一条 warn 提示这点。调高预算建议同时用 `COMPUTER_USE_COORDINATE_MODE=normalized_0_100`：百分比坐标的换算不依赖图像像素尺寸，不受下游重缩影响。
 
 想"看清细节"请优先用 `zoom`：它把区域裁出来再放大，预算作用在那一小块上，同一屏幕面积的有效像素远高于整屏截图。
+
+### 0.4.1：缓动默认关闭、旧变量移除、补文档
+
+- **`COMPUTER_USE_MOUSE_ANIMATION` 改为默认关闭**（显式 `=1` 才开启）。缓动对普通点击没有价值，只对少数需要"真实指针轨迹"的软件有用（悬停才展开的菜单、监听移动的拖放目标），代价是每次点击最多多等约 0.5 秒。
+- **移除 `COMPUTER_USE_HIDE_BEFORE_ACTION` 旧名兼容**。技能尚未发布，不存在需要兼容的存量配置 —— 留着一个永远不会被读到的名字只会在环境变量表里误导人。
+- 文档新增**落点校验（hit-test）**一节：所有鼠标落点类工具在注入输入前会检查目标坐标下的应用，不在白名单或档位不足都会拒绝执行。
+- 修掉架构图在 Typora 里的 `Lexical error`：mermaid 10.1.0 的词法分析器不接受**未加引号的 `·`**，节点标签一律加引号即可（`/`、`-`、`+`、中文各自都没问题，是 `·` 触发的）。
 
 ## 项目结构
 

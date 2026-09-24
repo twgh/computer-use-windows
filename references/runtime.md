@@ -61,8 +61,8 @@ scripts/
 | `COMPUTER_USE_CLIPBOARD_GUARD` | `0` 关闭 | 开启 | `click` tier 前台时暂存并清空用户剪贴板 |
 | `COMPUTER_USE_PIXEL_VALIDATION` | `1` 开启 | 关闭 | 点击前 9×9 像素陈旧校验 |
 | `COMPUTER_USE_AUTO_TARGET_DISPLAY` | `0` 关闭 | 开启 | 截图前把目标显示器自动切到「已授权应用窗口所在的那块屏」；模型用 `switch_display` 显式指定时以模型为准 |
-| `COMPUTER_USE_MOUSE_ANIMATION` | `0` 关闭 | 开启 | 指针缓动：按距离计算 pyautogui tween 时长（2000 px/秒，上限 0.5 秒）。每次点击 / 拖拽 / 移动最多增加约 0.5 秒延迟；关闭则光标瞬移 |
-| `COMPUTER_USE_FOCUS_BEFORE_ACTION` | `0` 关闭 | 开启 | 动作前把已授权应用窗口置前（Windows 语义，不隐藏任何窗口）。旧名 `COMPUTER_USE_HIDE_BEFORE_ACTION` 仍被识别：新名未设置时才回退读它 |
+| `COMPUTER_USE_MOUSE_ANIMATION` | `1` 开启 | **关闭** | 指针缓动：按距离计算 pyautogui tween 时长（2000 px/秒，上限 0.5 秒）。默认关闭（光标瞬移）；只有少数需要"真实指针轨迹"的软件才值得开（悬停才展开的菜单、监听移动的拖放目标），开启后每次点击 / 拖拽 / 移动最多多等约 0.5 秒 |
+| `COMPUTER_USE_FOCUS_BEFORE_ACTION` | `0` 关闭 | 开启 | 动作前把已授权应用窗口置前（Windows 语义，不隐藏任何窗口）。注意这会让某个已授权窗口跳到前台，从而遮挡其他窗口 |
 
 ### 图像预算
 

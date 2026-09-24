@@ -102,6 +102,9 @@ export interface CuSubGates {
    * travel distance into a pyautogui tween duration; the macOS host used a
    * native `mouse.move`. Re-read per call — flipping it takes effect on the
    * next action without a restart.
+   *
+   * The Windows runtime defaults this OFF (`COMPUTER_USE_MOUSE_ANIMATION=1`
+   * opts in): the glide buys nothing for ordinary clicking and costs latency.
    */
   mouseAnimation: boolean;
   /**
