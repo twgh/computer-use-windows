@@ -267,8 +267,51 @@ def get_process_path(pid: int) -> str | None:
     return None
 
 
+_FILE_DESCRIPTION_CACHE: dict[str, str | None] = {}
+
+
+def file_description(path: str | None) -> str | None:
+    """Human-readable name from the executable's version resource.
+
+    Exe file names are a poor display name — `olk.exe` is Microsoft Outlook,
+    `msedge.exe` is Microsoft Edge, `WINWORD.EXE` is Microsoft Word — and the
+    App Paths registry branch previously used the bare stem, which is where the
+    `olk` / `msoasb` / `IEDIAGCMD` noise in `request_access` came from. Only used
+    where the registry has no better name: Uninstall DisplayNames are already
+    localized and user-facing, and overriding them with version resources makes
+    them worse (`剪映专业版` → `JianyingPro`).
+
+    Cached: enumerating running processes or windows would otherwise read the
+    same PE resources dozens of times per call.
+    """
+    if not path:
+        return None
+    if path in _FILE_DESCRIPTION_CACHE:
+        return _FILE_DESCRIPTION_CACHE[path]
+    description: str | None = None
+    try:
+        translations = win32api.GetFileVersionInfo(path, "\\VarFileInfo\\Translation")
+        for lang, codepage in translations or []:
+            try:
+                value = win32api.GetFileVersionInfo(
+                    path, f"\\StringFileInfo\\{lang:04x}{codepage:04x}\\FileDescription"
+                )
+            except Exception:
+                continue
+            if isinstance(value, str) and value.strip():
+                description = value.strip()
+                break
+    except Exception:
+        description = None
+    _FILE_DESCRIPTION_CACHE[path] = description
+    return description
+
+
 def display_name_from_path(path: str | None, fallback: str) -> str:
     if path:
+        description = file_description(path)
+        if description:
+            return description
         stem = Path(path).stem
         if stem:
             return stem
@@ -748,7 +791,13 @@ def collect_app_paths(root, subkey: str, out: dict[str, dict[str, Any]]) -> None
                 if not app_path:
                     continue
                 identifier = os.path.normcase(app_path)
-                out.setdefault(identifier, {"bundleId": identifier, "displayName": Path(app_path).stem, "path": app_path})
+                # Version resource first: this branch has no DisplayName to
+                # prefer, and the raw stem is what produced names like `olk`.
+                display_name = file_description(app_path) or Path(app_path).stem
+                out.setdefault(
+                    identifier,
+                    {"bundleId": identifier, "displayName": display_name, "path": app_path},
+                )
     except OSError:
         return
 
@@ -827,6 +876,34 @@ def focus_existing_window(bundle_id: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def window_apps() -> list[dict[str, Any]]:
+    """Apps that currently own a visible top-level window.
+
+    `request_access`'s candidate list was registry-only, which misses every
+    Store app (Calculator, Photos, …): those have no Uninstall / App Paths entry
+    carrying a usable name, yet they are exactly what a computer-use agent gets
+    asked to drive. A visible window is the strongest available signal that a
+    process is something the user can name, so these get merged into the hint —
+    `enum_windows()` already restricts this to on-screen, titled, non-iconic
+    windows.
+    """
+    results: dict[str, dict[str, Any]] = {}
+    for window in enum_windows():
+        path = window["processPath"]
+        if not path:
+            continue
+        identifier = os.path.normcase(path)
+        results.setdefault(
+            identifier,
+            {
+                "bundleId": identifier,
+                "displayName": display_name_from_path(path, window["ownerName"]),
+                "path": path,
+            },
+        )
+    return sorted(results.values(), key=lambda item: item["displayName"].lower())
 
 
 def open_app(bundle_id: str) -> None:
@@ -1277,6 +1354,9 @@ def main() -> int:
             return 0
         if command == "list_running_apps":
             json_output({"ok": True, "result": running_apps()})
+            return 0
+        if command == "list_window_apps":
+            json_output({"ok": True, "result": window_apps()})
             return 0
         if command == "open_app":
             open_app(str(payload["bundleId"]))

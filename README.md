@@ -1,4 +1,4 @@
-# Windows Computer-Use Skill 0.2.1
+# Windows Computer-Use Skill 0.3.0
 
 ## 项目定位
 
@@ -166,7 +166,7 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 
 ### 已知限制
 
-- `request_access` 描述里的候选应用清单只来自注册表（Uninstall + App Paths），因此存在两类噪声：内部代号（如 `olk`、`msoasb`、`IEDIAGCMD`、`WindowsPackageManagerServer`）会出现在清单里，而 Store 应用（`WindowsApps` 下的包，如计算器）不会出现 —— 后者仍可按显示名授权（解析时会并入运行中进程），但模型看不到名字，只能传可执行文件路径。
+- `request_access` 的候选应用清单是「注册表安装项 ∪ 当前有可见窗口的进程」，上限 50 个（超出会附 `... and N more`）。少数条目仍是不易读的文件名（如 `mspaint`、`store`、`devenv`），因为对应可执行文件没有版本资源可读。
 - `resolvePrepareCapture` 的 `focusBeforeAction` 选项沿用 macOS 实现，helper 忽略它；`autoResolve` 已实现（按已授权应用窗口所在屏选显示器）。
 - `check_permissions` 在 Windows 上恒返回已授权，因此 `tcc_not_granted` 分支不会触发。
 - 鼠标缓动（`COMPUTER_USE_MOUSE_ANIMATION`）默认开启，按距离计算时长（2000 px/秒，上限 0.5 秒），因此点击密集的任务每次点击最多多等约 0.5 秒。追求速度可设为 `0`。
@@ -191,6 +191,15 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 | 自动定位显示器空转 | 已授权应用在第 2/3 屏，首张截图却总在主屏 | helper 的 `resolve_prepare_capture` 支持 `autoResolve` + `allowlistBundleIds` |
 | `type` 极慢 | 27 字符耗时 7.1 秒（每个字素启动一次 Python 进程） | 连续普通字符合并为一次调用，同字符串降到 1.1 秒 |
 | `open_application` 重复开窗 | 契约是「带到前台」，实际每次调用都新开一个窗口（验证期间攒出 3 个记事本窗口） | 先按宿主进程匹配已有窗口并聚焦，找不到才启动 |
+
+### 0.3.0：补齐应用枚举
+
+`request_access` 的候选清单此前只来自注册表，导致模型看不到 Store 应用（计算器就在屏上却拿不到名字），同时混入大量内部代号（`olk`、`msoasb`、`IEDIAGCMD`）。两项改动：
+
+- **显示名改取可执行文件的版本资源**（仅 `App Paths` 分支）：`olk` → `Microsoft Outlook`、`chrome` → `Google Chrome`、`EXCEL` → `Microsoft Excel`。Uninstall 分支不动 —— 它的 `DisplayName` 已是本地化的用户可见名称（`剪映专业版`、`阿里云盘`），用版本资源覆盖反而更差（→ `JianyingPro`、`aDrive`）。
+- **并入「当前有可见窗口的进程」**（新增 helper 命令 `list_window_apps`）：可见窗口是「这是用户能指认的应用」的最强信号，Store 应用由此进入清单。窗口来源的条目跳过安装路径白名单，否则 `D:\appsd\`、`C:\apps\` 下的便携应用会被丢掉。
+
+实测：清单中出现 `Calculator`；抽样的 `Calculator`、`Notepad`、`Google Chrome`、`MuMu模拟器` 四个名称全部授权成功（中文名亦正常）。
 
 ## 项目结构
 

@@ -2,6 +2,13 @@ type InstalledAppLike = {
   readonly bundleId: string
   readonly displayName: string
   readonly path: string
+  /**
+   * `'window'` marks an entry derived from a process that currently owns a
+   * visible window. Those are user-facing by definition, so the install-path
+   * allowlist does not apply — a portable app under `C:\apps\` would otherwise
+   * be dropped while the user is looking straight at it.
+   */
+  readonly origin?: 'installed' | 'window'
 }
 
 /**
@@ -54,6 +61,24 @@ const NAME_PATTERN_BLOCKLIST: readonly RegExp[] = [
   /\bDriver\b/i,
   /\bSDK\b/i,
   /^KB\d+/i,
+  // Shell / input / Store-app hosts that own windows but are not something to
+  // drive. Names come from the executables' version resources, so they read as
+  // prose rather than file names.
+  /^Application Frame Host$/i,
+  /^TextInputHost$/i,
+  /^Windows Input Experience$/i,
+  /^Windows Shell Experience Host$/i,
+  /^ShellExperienceHost$/i,
+  /^StartMenuExperienceHost$/i,
+  /^SearchHost$/i,
+  /^Program Manager$/i,
+  /^Desktop Window Manager$/i,
+  // Non-interactive Office / component servers surfaced by App Paths.
+  /^Microsoft Office (component|Trusted Web Host)$/i,
+  /^Microsoft Office SDX Helper$/i,
+  /^Office XML Handler$/i,
+  /^DocumentChat /i,
+  /^Microsoft Office (Click-to-Run|Setup)/i,
 ]
 
 /**
@@ -156,7 +181,8 @@ export function filterAppsForDescription(
       alwaysKept.push(app.displayName)
       continue
     }
-    if (isUserFacingPath(app.path, homeDir) && !NAME_PATTERN_BLOCKLIST.some(re => re.test(app.displayName))) {
+    const userFacing = app.origin === 'window' || isUserFacingPath(app.path, homeDir)
+    if (userFacing && !NAME_PATTERN_BLOCKLIST.some(re => re.test(app.displayName))) {
       rest.push(app.displayName)
     }
   }

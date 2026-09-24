@@ -2,16 +2,32 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { homedir } from 'node:os'
 import { createComputerUseMcpServer } from './vendor/computer-use-mcp/mcpServer.js'
 import { buildComputerUseTools } from './vendor/computer-use-mcp/tools.js'
+import type { InstalledApp } from './vendor/computer-use-mcp/executor.js'
 import { filterAppsForDescription } from './computer-use/appNames.js'
 import { getComputerUseHostAdapter } from './computer-use/hostAdapter.js'
 import { getChicagoCoordinateMode } from './computer-use/gates.js'
+import { listWindowApps } from './computer-use/windowApps.js'
 import { createSessionContext } from './session.js'
 import { logDebug } from './lib/log.js'
 
 async function getInstalledAppNames(): Promise<string[] | undefined> {
   try {
     const installed = await getComputerUseHostAdapter().executor.listInstalledApps()
-    return filterAppsForDescription(installed, homedir())
+    // Merge in apps that currently own a visible window: the registry list has
+    // no usable name for Store apps, which are exactly what an agent is often
+    // asked to drive. Tagged so the name filter can skip the install-path
+    // allowlist — a running, on-screen app is user-facing by definition.
+    let windowApps: InstalledApp[] = []
+    try {
+      windowApps = await listWindowApps()
+    } catch {}
+    return filterAppsForDescription(
+      [
+        ...installed,
+        ...windowApps.map(app => ({ ...app, origin: 'window' as const })),
+      ],
+      homedir(),
+    )
   } catch {
     return undefined
   }

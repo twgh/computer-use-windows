@@ -132,8 +132,9 @@ scripts/
 | `cursor_position` | — | `{x, y}` |
 | `frontmost_app` | — | `{bundleId, displayName, elevated, selfElevated}` 或 `null` |
 | `app_under_point` | `x`、`y` | 同上 |
-| `list_installed_apps` | — | `[{bundleId, displayName, path}]` |
+| `list_installed_apps` | — | `[{bundleId, displayName, path}]`（注册表 Uninstall + App Paths；后者的显示名取自 exe 版本资源） |
 | `list_running_apps` | — | `[{bundleId, displayName}]` |
+| `list_window_apps` | — | `[{bundleId, displayName, path}]`，当前拥有可见顶层窗口的进程（含 Store 应用） |
 | `open_app` | `bundleId` | `true` |
 | `read_clipboard` | — | 字符串 |
 | `write_clipboard` | `text` | `true` |
@@ -180,5 +181,7 @@ scripts/
 - **`autoResolve` 已实现**：未固定显示器且允许自动解析时，helper 用 `find_window_displays` 选「已授权应用窗口所在的那块屏」。不实现的话默认永远截主屏，`COMPUTER_USE_AUTO_TARGET_DISPLAY` 就是空开关。`focusBeforeAction` 仍是 macOS 选项，helper 忽略。
 - **`type` 按连续文本批量下发**。每个 executor 调用在 Python bridge 上都是一次进程启动，逐字素调用会让 27 字符花掉 7 秒；现在连续的普通字符合并成一次调用（helper 内部仍逐字符 8ms），换行 / 制表符各自单独成键。
 - **`check_permissions` 恒返回已授权**，`tcc_not_granted` 分支在 Windows 上是死路径。
-- **`computer-use/appNames.ts` 已按 Windows 改写**（Program Files / AppData / Steam 白名单，System32 / Winsxs / Installer 黑名单，注册表噪声名称黑名单）。Windows 的 `bundleId` 是规范化后的可执行文件路径，不是 bundle id，因此「始终保留」名单按显示名匹配。注意候选清单只来自注册表，Store 应用（`WindowsApps` 下的包）与只有 App Paths 条目的应用可能缺席 —— 名字仍然可以授权（解析时会并入运行中进程），但清单里看不到。
+- **候选清单 = 注册表安装项 ∪ 有可见窗口的进程**（`list_window_apps`，`source/computer-use/windowApps.ts`）。注册表给不出 Store 应用的可读名称（计算器在 `WindowsApps` 下，既无 Uninstall 条目也无 App Paths 条目），而可见窗口是「用户能指认的应用」的最强信号。窗口来源的条目带 `origin: 'window'`：跳过安装路径白名单（便携应用可能在 `D:\appsd\` 这类任意目录），但仍要过名称黑名单。
+- **显示名优先取 exe 版本资源**（`file_description`，按路径缓存）。只作用于 App Paths 分支与 `display_name_from_path`，不覆盖 Uninstall 的 `DisplayName` —— 后者已是本地化用户可见名，覆盖后反而变差。
+- **`computer-use/appNames.ts` 的路径规则**：Program Files / AppData / Steam 白名单，System32 / Winsxs / Installer 黑名单，外加注册表与 Windows 组件噪声名称黑名单。Windows 的 `bundleId` 是规范化后的可执行文件路径，不是 bundle id，因此「始终保留」名单按显示名匹配。
 - **分层的取舍**：写盘（`save_to_disk`）由 host 注入回调实现，vendor 层不直接依赖 `node:fs`，与 `cropRawPatch` 的注入方式一致。

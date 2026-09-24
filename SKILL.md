@@ -1,6 +1,6 @@
 ---
 name: computer-use-windows
-version: 0.2.1
+version: 0.3.0
 description: Windows 桌面 computer-use 能力：截图（多显示器 / 混合 DPI / 区域放大）、鼠标点击与拖拽、键盘输入与组合键、应用启动与前台切换、剪贴板读写、窗口与显示器映射。自带独立 MCP server 与 Python runtime，首次运行自动自举，不依赖私有原生模块或提取的应用资产，适配任意支持 MCP 的 agent 客户端。当任务需要在 Windows 上操作用户桌面（截屏、点击、输入文字、按快捷键、启动或切换应用、读取剪贴板、多屏操作）时，使用本 skill。
 agent_created: false
 tags:
@@ -82,7 +82,7 @@ Python 侧无需手动准备，也不会在构建期安装。
 
 严格按此顺序推进，每一步的结果都决定下一步：
 
-1. **`request_access`** —— 在任何其他工具之前必须调用。传入 `apps`（应用显示名或 bundle id，可一次传多个）与 `reason`（一句话说明任务）。返回 `granted` / `denied`；`denied` 中 `reason: not_installed` 表示名字没解析到已安装应用，换名称重试。
+1. **`request_access`** —— 在任何其他工具之前必须调用。传入 `apps`（应用显示名或 bundle id，可一次传多个）与 `reason`（一句话说明任务）。**名字优先从工具描述里给出的本机候选清单里挑**（该清单既含已安装应用，也含当前有可见窗口的进程，包含 Store 应用），避免自己猜名字。返回 `granted` / `denied`；`denied` 中 `reason: not_installed` 表示名字没解析到应用，换名称或改用可执行文件路径重试。
 2. **`screenshot`** —— 拿到当前画面。白名单为空时 `screenshot` 直接返回 `allowlist_empty` 错误。
 3. **动作** —— 点击 / 输入 / 按键 / 滚动 / 拖拽。坐标一律基于最近一次 `screenshot` 的图像像素。
 4. **回到第 2 步验证**，再决定下一个动作。
