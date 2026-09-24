@@ -21,6 +21,7 @@ Use this skill when the task needs a portable Windows computer-use skill bundled
 - lets the server auto-bootstrap its Python runtime on first launch
 - avoids any dependency on a specific agent client's local binaries, `.node` modules, or extracted app assets
 - stays explicitly Windows-only because the underlying desktop-control backend is Windows-specific
+- reports each display with its monitor model, resolution, scale factor and position relative to the primary display — identify displays by those attributes when the user describes one ("the 125% screen", "the right monitor"), because our display numbering may differ from the arbitrary numbers shown in Windows Settings
 
 ## Bundled project path
 

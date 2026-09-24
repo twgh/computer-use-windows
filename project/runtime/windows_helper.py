@@ -266,31 +266,152 @@ def _monitor_scale_factor(left: int, top: int, width: int, height: int) -> float
     return 1.0
 
 
+DISPLAY_DEVICE_ACTIVE = 0x1
+
+
+def _monitor_edid_name(device: str) -> str | None:
+    """Monitor model string from EDID (e.g. "ROG STRIX XG27AQM")."""
+    try:
+        mon = win32api.EnumDisplayDevices(device, 0)
+        s = (mon.DeviceString or "").strip()
+        return s or None
+    except Exception:
+        return None
+
+
+def _relative_position(origin_x: int, origin_y: int, primary: dict[str, Any] | None) -> str:
+    """Human-identifiable spatial position relative to the primary display."""
+    if not primary:
+        return "primary"
+    dx = origin_x - primary["originX"]
+    dy = origin_y - primary["originY"]
+    if abs(dx) <= 100 and abs(dy) <= 100:
+        return "primary"
+    parts = []
+    if dy < 0:
+        parts.append("above")
+    elif dy > 0:
+        parts.append("below")
+    if dx > 0:
+        parts.append("right of")
+    elif dx < 0:
+        parts.append("left of")
+    return " ".join(parts) + " the primary display" if parts else "primary"
+
+
+def _monitor_metadata() -> list[dict[str, Any]]:
+    """Per-monitor metadata keyed for lookup by rect: GDI device name and the
+    number Windows Settings shows for the display. Settings numbers come from
+    EnumDisplayDevices' active-display index + 1, which is exactly the big
+    number rendered in Settings > System > Display (and on the identity view
+    when you click Identify). mss' enumeration order does NOT match it."""
+    monitors: list[dict[str, Any]] = []
+    try:
+        for hmon, _hdc, rect in win32api.EnumDisplayMonitors(None, None):
+            info = win32api.GetMonitorInfo(hmon)
+            monitors.append(
+                {
+                    "device": info["Device"],
+                    "left": rect[0],
+                    "top": rect[1],
+                    "width": rect[2] - rect[0],
+                    "height": rect[3] - rect[1],
+                }
+            )
+    except Exception:
+        return monitors
+    numbers: dict[str, int] = {}
+    try:
+        i = 0
+        while True:
+            try:
+                dev = win32api.EnumDisplayDevices(None, i)
+            except Exception:
+                break
+            if dev is None:
+                break
+            if dev.StateFlags & DISPLAY_DEVICE_ACTIVE:
+                numbers[dev.DeviceName] = i + 1
+            i += 1
+    except Exception:
+        pass
+    for m in monitors:
+        m["settingsNumber"] = numbers.get(m["device"])
+    return monitors
+
+
 def get_displays() -> list[dict[str, Any]]:
     displays: list[dict[str, Any]] = []
+    meta = _monitor_metadata()
     with mss.MSS() as sct:
         for idx, monitor in enumerate(sct.monitors[1:], start=1):
             origin_x = int(monitor["left"])
             origin_y = int(monitor["top"])
             width = int(monitor["width"])
             height = int(monitor["height"])
+            # Match the mss monitor to its GDI device so the reported number
+            # is the one the user sees in Windows Settings.
+            entry = next(
+                (
+                    m
+                    for m in meta
+                    if m["left"] == origin_x
+                    and m["top"] == origin_y
+                    and m["width"] == width
+                    and m["height"] == height
+                ),
+                None,
+            )
+            number = (entry or {}).get("settingsNumber") or idx
+            device = (entry or {}).get("device")
             is_primary = origin_x == 0 and origin_y == 0
+            scale = _monitor_scale_factor(origin_x, origin_y, width, height)
             displays.append(
                 {
-                    "id": idx,
-                    "displayId": idx,
+                    "id": number,
+                    "displayId": number,
                     "width": width,
                     "height": height,
-                    "scaleFactor": _monitor_scale_factor(origin_x, origin_y, width, height),
+                    "scaleFactor": scale,
                     "originX": origin_x,
                     "originY": origin_y,
                     "isPrimary": is_primary,
-                    "name": f"Display {idx}",
-                    "label": f"Display {idx}",
+                    "name": f"Display {number}",
+                    "label": f"Display {number}",
                 }
             )
     if displays and not any(display["isPrimary"] for display in displays):
         displays[0]["isPrimary"] = True
+    displays.sort(key=lambda display: display["displayId"])
+    # Enrich labels with EDID model, scale and spatial position so the agent
+    # can match a user's description ("the 125% screen", "the right monitor")
+    # even though Windows Settings numbering may differ from our ids.
+    primary = next((d for d in displays if d["isPrimary"]), None)
+    for display in displays:
+        device = next(
+            (
+                m["device"]
+                for m in meta
+                if m["left"] == display["originX"]
+                and m["top"] == display["originY"]
+                and m["width"] == display["width"]
+                and m["height"] == display["height"]
+            ),
+            None,
+        )
+        model = _monitor_edid_name(device) if device else None
+        scale_pct = f"{round(display['scaleFactor'] * 100)}%"
+        position = (
+            "primary"
+            if display["isPrimary"]
+            else _relative_position(display["originX"], display["originY"], primary)
+        )
+        bits = [f"Display {display['displayId']}"]
+        if model:
+            bits.append(model)
+        bits.append(f"{display['width']}x{display['height']} @{scale_pct}")
+        bits.append(position)
+        display["label"] = display["name"] = " · ".join(bits)
     return displays
 
 
