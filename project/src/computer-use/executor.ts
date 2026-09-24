@@ -78,8 +78,8 @@ export function createCliExecutor(_opts: {
       hostBundleId: CLI_HOST_BUNDLE_ID,
     },
 
-    async prepareForAction(): Promise<string[]> {
-      return callPythonHelper('prepare_for_action', {})
+    async prepareForAction(allowlistBundleIds: string[]): Promise<string[]> {
+      return callPythonHelper('prepare_for_action', { allowlistBundleIds })
     },
 
     async previewHideSet() {

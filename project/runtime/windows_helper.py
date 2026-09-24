@@ -737,6 +737,74 @@ def restore_window(hwnd: int) -> None:
         pass
 
 
+def _force_foreground(hwnd: int) -> None:
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+        return
+    except Exception:
+        pass
+    # Background processes are not allowed to steal focus — attach to the
+    # foreground thread's input queue to earn SetForegroundWindow permission.
+    fg = win32gui.GetForegroundWindow()
+    cur_tid = kernel32.GetCurrentThreadId()
+    fg_tid = win32process.GetWindowThreadProcessId(fg)[0] if fg else cur_tid
+    target_tid = win32process.GetWindowThreadProcessId(hwnd)[0]
+    user32.AttachThreadInput(cur_tid, fg_tid, True)
+    user32.AttachThreadInput(cur_tid, target_tid, True)
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+    finally:
+        user32.AttachThreadInput(cur_tid, fg_tid, False)
+        user32.AttachThreadInput(cur_tid, target_tid, False)
+
+
+def prepare_for_action(allowlist: list[str]) -> list[str]:
+    """Windows prepare-for-action. The macOS runtime hides non-allowlisted
+    apps and defocuses the host; hiding windows on Windows would be far too
+    intrusive, so the equivalent here makes sure a granted app's window is
+    foreground: the frontmost gate then passes and input reaches the target
+    instead of the chat box. Nothing gets hidden — returns []."""
+    allow = {a.strip().lower() for a in allowlist if a and a.strip()}
+    if not allow:
+        return []
+    hwnd = win32gui.GetForegroundWindow()
+    if hwnd:
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        path = get_process_path(pid)
+        if path and os.path.normcase(path) in allow:
+            return []  # a granted app is already frontmost
+    target: int | None = None
+    minimized: int | None = None
+
+    def callback(h: int, _lparam: int) -> bool:
+        nonlocal target, minimized
+        if target is not None:
+            return True  # already hold the topmost visible allowlisted window
+        if not win32gui.IsWindowVisible(h):
+            return True
+        _, pid = win32process.GetWindowThreadProcessId(h)
+        path = get_process_path(pid)
+        if not path or os.path.normcase(path) not in allow:
+            return True
+        if not (win32gui.GetWindowText(h) or "").strip():
+            return True
+        if win32gui.IsIconic(h):
+            if minimized is None:
+                minimized = h
+            return True
+        target = h  # topmost visible allowlisted window (z-order)
+        return True  # never return False — pywin32 turns that into error(2)
+
+    win32gui.EnumWindows(callback, None)
+    chosen = target if target is not None else minimized
+    if chosen is not None:
+        if win32gui.IsIconic(chosen):
+            win32gui.ShowWindow(chosen, SW_RESTORE)
+            time.sleep(0.05)
+        _force_foreground(chosen)
+    return []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("command")
@@ -784,7 +852,7 @@ def main() -> int:
             json_output({"ok": True, "result": capture_monitor(region, resize)})
             return 0
         if command == "prepare_for_action":
-            json_output({"ok": True, "result": []})
+            json_output({"ok": True, "result": prepare_for_action(list(payload.get("allowlistBundleIds") or []))})
             return 0
         if command == "preview_hide_set":
             json_output({"ok": True, "result": []})
