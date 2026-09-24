@@ -521,7 +521,10 @@ def capture_monitor(monitor: dict[str, int], resize: tuple[int, int] | None = No
     with mss.MSS() as sct:
         raw = sct.grab(monitor)
         image = Image.frombytes("RGB", raw.size, raw.rgb)
-    if resize:
+    # Skip a 1:1 resample: calling caller now asks for the capture's own size
+    # when it fits the vision budget, and LANCZOS on identical dimensions is
+    # pure cost (and a pointless chance to perturb pixels).
+    if resize and tuple(resize) != image.size:
         image = image.resize(resize, Image.Resampling.LANCZOS)
     buffer = BytesIO()
     image.save(buffer, format="JPEG", quality=75, optimize=True)

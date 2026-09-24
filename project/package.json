@@ -1,6 +1,6 @@
 {
   "name": "computer-use-windows",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Top-level Windows computer-use skill with a bundled standalone runtime and MCP server, usable from any MCP-capable agent client.",
   "type": "module",
   "bin": {

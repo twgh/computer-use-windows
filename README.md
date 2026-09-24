@@ -1,4 +1,4 @@
-# Windows Computer-Use Skill 0.3.0
+# Windows Computer-Use Skill 0.3.1
 
 ## 项目定位
 
@@ -200,6 +200,10 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - **并入「当前有可见窗口的进程」**（新增 helper 命令 `list_window_apps`）：可见窗口是「这是用户能指认的应用」的最强信号，Store 应用由此进入清单。窗口来源的条目跳过安装路径白名单，否则 `D:\appsd\`、`C:\apps\` 下的便携应用会被丢掉。
 
 实测：清单中出现 `Calculator`；抽样的 `Calculator`、`Notepad`、`Google Chrome`、`MuMu模拟器` 四个名称全部授权成功（中文名亦正常）。
+
+### 0.3.1：不再放大截图
+
+截图目标尺寸此前会乘显示器缩放系数 —— 又是 macOS 移植残留（那边 `DisplayGeometry` 是逻辑点，需要乘才能得到物理像素）。本后端上报的已是物理像素，乘上去只会把图放大：1280x800 的屏会被插值成 1389x868，像素更多、载荷更大、细节为零。分辨率足够大的屏受 token 预算限制，乘与不乘结果相同，因此这个偏差一直没暴露。`zoom` 的放大属刻意行为，保留（改用独立的 `zoomTargetDims`）。
 
 ## 项目结构
 

@@ -262,7 +262,7 @@ export function createComputerUseMcpServer(
   const { serverName, logger } = adapter;
 
   const server = new Server(
-    { name: serverName, version: "0.3.0" },
+    { name: serverName, version: "0.3.1" },
     { capabilities: { tools: {}, logging: {} } },
   );
 

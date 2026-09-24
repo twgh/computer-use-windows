@@ -19,14 +19,39 @@ type PythonDisplayGeometry = DisplayGeometry
 
 type PythonResolvePrepareCaptureResult = ResolvePrepareCaptureResult
 
-function computeTargetDims(
-  logicalW: number,
-  logicalH: number,
+/**
+ * Capture target for `screenshot`: the display's own pixel size, capped by the
+ * vision budget. Never larger than the capture.
+ *
+ * Deliberately NOT multiplied by `scaleFactor`. That multiplication is a macOS
+ * porting leftover — there `DisplayGeometry.width/height` are logical points, so
+ * a Retina capture needs the factor to reach physical pixels. This backend
+ * reports physical pixels (mss grabs them, and a PMv2-aware `GetWindowRect`
+ * agrees), so multiplying upscales instead: a 1280x800 display was captured at
+ * 1280x800 and then resampled to 1389x868 — interpolated pixels, bigger
+ * payload, no extra detail. Screens large enough to hit the token budget were
+ * unaffected, which is why this hid for so long.
+ */
+function screenshotTargetDims(width: number, height: number): [number, number] {
+  return targetImageSize(width, height, API_RESIZE_PARAMS)
+}
+
+/**
+ * Capture target for `zoom`. Magnification here is intentional: the tool exists
+ * to make text the model could not read legible, and a 1:1 crop of an already
+ * downsampled screenshot is exactly what it already could not read. Follows the
+ * display scale factor, then the same vision budget applies.
+ */
+function zoomTargetDims(
+  physicalW: number,
+  physicalH: number,
   scaleFactor: number,
 ): [number, number] {
-  const physW = Math.round(logicalW * scaleFactor)
-  const physH = Math.round(logicalH * scaleFactor)
-  return targetImageSize(physW, physH, API_RESIZE_PARAMS)
+  return targetImageSize(
+    Math.round(physicalW * scaleFactor),
+    Math.round(physicalH * scaleFactor),
+    API_RESIZE_PARAMS,
+  )
 }
 
 function normalizeDisplayGeometry(display: PythonDisplayGeometry): DisplayGeometry {
@@ -106,7 +131,7 @@ export function createCliExecutor(opts: {
 
     async resolvePrepareCapture(opts): Promise<ResolvePrepareCaptureResult> {
       const display = await this.getDisplaySize(opts.preferredDisplayId)
-      const [targetW, targetH] = computeTargetDims(display.width, display.height, display.scaleFactor)
+      const [targetW, targetH] = screenshotTargetDims(display.width, display.height)
       const result = await callPythonHelper<PythonResolvePrepareCaptureResult>('resolve_prepare_capture', {
         preferredDisplayId: opts.preferredDisplayId,
         // Forwarded so the helper can pick the display the granted apps are on
@@ -127,7 +152,7 @@ export function createCliExecutor(opts: {
 
     async screenshot(opts): Promise<ScreenshotResult> {
       const display = await this.getDisplaySize(opts.displayId)
-      const [targetW, targetH] = computeTargetDims(display.width, display.height, display.scaleFactor)
+      const [targetW, targetH] = screenshotTargetDims(display.width, display.height)
       const result = await callPythonHelper<ScreenshotResult>('screenshot', {
         displayId: opts.displayId,
         targetWidth: targetW,
@@ -139,7 +164,7 @@ export function createCliExecutor(opts: {
 
     async zoom(regionLogical, _allowedBundleIds, displayId) {
       const display = await this.getDisplaySize(displayId)
-      const [outW, outH] = computeTargetDims(regionLogical.w, regionLogical.h, display.scaleFactor)
+      const [outW, outH] = zoomTargetDims(regionLogical.w, regionLogical.h, display.scaleFactor)
       return callPythonHelper('zoom', {
         x: regionLogical.x,
         y: regionLogical.y,

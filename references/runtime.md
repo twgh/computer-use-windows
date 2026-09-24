@@ -177,7 +177,8 @@ scripts/
 - **窗口归属要穿透 `ApplicationFrameWindow`**（`resolve_window_pid`）。Store 应用的可见窗口是 `ApplicationFrameWindow`，归属进程是 `ApplicationFrameHost.exe` 而非应用自身。不做这一跳，应用能出现在 `list_installed_apps` / `list_running_apps` 里，却没有任何窗口归给它：`find_window_displays` 漏报、`app_under_point` 认错进程、`prepare_for_action` 无法聚焦、前台门控直接拒绝输入 —— 结果就是「授权成功但完全无法操作」。WinUI3 自带窗口的应用（如记事本）不受影响，所以这个问题只在部分 Store 应用上暴露。
 - **stdio 一律 UTF-8**。Python 在 stdout 为管道时按 locale 编码（中文 Windows 是 cp936）输出，而 helper 用 `ensure_ascii=False` 写 JSON：不固定编码时，显示器标签里的 `·`、中文应用名、剪贴板内容都会变成 U+FFFD。调用侧设 `PYTHONIOENCODING=utf-8`，helper 自身也 `reconfigure` 一遍作为兜底。
 - **Win32 调用必须声明 `argtypes` / `restype`**。ctypes 未声明时按 `c_int`（32 位）解析返回值，x64 上会截断 HANDLE —— 曾经把剪贴板句柄截成 `0xFFFFFFFF84DA0810`，`GlobalLock` 直接 access violation。涉及指针返回的剪贴板 / 句柄 API 已显式声明。
-- **`prepare_for_action` 不隐藏窗口**，只把已授权应用置前（返回空数组）。`COMPUTER_USE_FOCUS_BEFORE_ACTION` 的名字反映这一语义，`focusBeforeAction` 子门控字段同理。
+- **截图目标尺寸取显示器自身像素，不再乘 `scaleFactor`**。`DisplayGeometry.width/height` 在本后端已是物理像素（mss 按此抓取，PMv2 的 `GetWindowRect` 亦相符），乘缩放系数是 macOS 移植残留（那边是逻辑点）。乘上去只会放大：1280x800 的屏会被插值到 1389x868 —— 凭空多出像素、载荷更大、细节为零。分辨率足够大的屏因 token 预算限制而结果相同，所以这个偏差一直没暴露。`zoom` 的放大是刻意保留的（该工具就是为了让读不清的字变大），走独立的 `zoomTargetDims`。
+- **`prepare_for_action` 不隐藏窗口**，只把已授权应用置前（返回空数组）。`COMPUTER_USE_FOCUS_BEFORE_ACTION` 的名字反映这一语义，`focusBeforeAction` 子门控字段同理。注意：由于窗口不会被隐藏，**原子截图路径（`autoTargetDisplay` 开启，默认）不执行这一步** —— 在截图前把某个已授权窗口提到前台只会遮挡模型正在看的内容，而输入动作会自己调用它。这是与 macOS（隐藏非授权窗口、使截图更"真实"）的有意差异。
 - **`autoResolve` 已实现**：未固定显示器且允许自动解析时，helper 用 `find_window_displays` 选「已授权应用窗口所在的那块屏」。不实现的话默认永远截主屏，`COMPUTER_USE_AUTO_TARGET_DISPLAY` 就是空开关。`focusBeforeAction` 仍是 macOS 选项，helper 忽略。
 - **`type` 按连续文本批量下发**。每个 executor 调用在 Python bridge 上都是一次进程启动，逐字素调用会让 27 字符花掉 7 秒；现在连续的普通字符合并成一次调用（helper 内部仍逐字符 8ms），换行 / 制表符各自单独成键。
 - **`check_permissions` 恒返回已授权**，`tcc_not_granted` 分支在 Windows 上是死路径。
