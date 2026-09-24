@@ -16,6 +16,28 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+# Per-monitor DPI awareness v2 (Win10 1703+) — MUST run before importing
+# pyautogui/pyscreeze: pyautogui calls SetProcessDPIAware() at import time,
+# and the first awareness call wins. PMv2 unifies GetWindowRect,
+# SetCursorPos, WindowFromPoint and GetMonitorInfo rects into the same true
+# per-monitor coordinate space; PMv1 (shcore level 2) virtualizes coordinates
+# on monitors whose DPI differs from the system DPI, which breaks mixed-DPI
+# setups: screenshot rects and click targets stop agreeing.
+user32_early = ctypes.windll.user32
+user32_early.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+user32_early.SetProcessDpiAwarenessContext.restype = ctypes.c_bool
+if not user32_early.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+    # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 unavailable (pre-1703)
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+import mss
+
 import mss
 import psutil
 import pythoncom
@@ -32,14 +54,6 @@ os.environ.setdefault("PYAUTOGUI_HIDE_SUPPORT_PROMPT", "1")
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
-
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)
-except Exception:
-    try:
-        ctypes.windll.user32.SetProcessDPIAware()
-    except Exception:
-        pass
 
 KEY_MAP = {
     **{chr(i): chr(i) for i in range(ord("a"), ord("z") + 1)},
