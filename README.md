@@ -1,4 +1,4 @@
-# Windows Computer-Use Skill 0.4.2
+# Windows 电脑使用 Skill 0.4.2
 
 ## 项目定位
 
@@ -10,20 +10,39 @@
 
 它是 skill-first，客户端无关，可对接任意支持 MCP 的 agent 产品。
 
-## 这个项目解决什么问题
+### 这个项目解决什么问题
 
 - 不依赖任何特定 agent 客户端的本机应用
 - 不依赖私有 `.node` 二进制
 - 不依赖提取内部隐藏资产
 - skill 装上、server 构建好，就能直接用
 
-## 你现在拿到的能力
+### 你现在拿到的能力
 
 - 顶级 Windows computer-use skill
 - 独立 MCP server：截图、鼠标、键盘、应用启动、窗口/显示器映射、剪贴板
 - 只使用公开依赖：`Node.js + Python + pyautogui + mss + Pillow + psutil + pywin32`
 - 首次运行自动自举：自动创建虚拟环境并安装 Python 依赖
 - 提取出来的 TypeScript 工具层已经接到 Windows 原生 Python backend
+
+## MCP 配置
+
+```json
+{
+  "mcpServers": {
+    "computer-use-windows": {
+      "command": "node",
+      "args": [
+        "C:/Users/<user>/.agents/skills/computer-use-windows/project/dist/cli.js"
+      ],
+      "env": {
+        "COMPUTER_USE_DEBUG": "0",
+        "COMPUTER_USE_COORDINATE_MODE": "pixels"
+      }
+    }
+  }
+}
+```
 
 ## 暴露的 MCP 工具
 
@@ -53,6 +72,37 @@
 - UAC / 管理员窗口：提权窗口可正确识别、截图与窗口管理正常；非提权 runtime 注入的输入被 Windows UIPI 拦截，helper 会显式报错并提示以管理员运行 runtime
 - 混合 DPI 场景，多屏不同缩放验证通过
 
+## 打包分发
+
+```bash
+python scripts/validate_skill.py .   # 先校验 skill 结构
+cd scripts
+python package_skill.py              # 生成 computer-use-windows.zip
+```
+
+打包的是纯净的 skill 目录结构，不含构建产物和无关文件
+
+## 项目结构
+
+```text
+SKILL.md               # 技能入口指引（agent 先读这个）
+README.md              # 本文件
+references/
+  tools.md             # 24 个 MCP 工具的完整参数与错误码
+  runtime.md           # 环境变量、helper 子命令、自举机制、分层说明
+  troubleshooting.md   # 常见故障定位与处置
+project/
+  src/
+    computer-use/      # Windows 适配层（executor / gates / pythonBridge / imageSave / 锁）
+    vendor/computer-use-mcp/  # 平台无关的 MCP 工具与门控框架
+  runtime/             # Windows Python helper 与依赖清单
+  dist/                # 构建产物（不随 zip 分发）
+  .runtime/            # 自举 venv 与依赖 stamp（不随 zip 分发）
+scripts/
+  package_skill.py     # 打包分发脚本
+  validate_skill.py    # skill 结构校验（UTF-8 安全，无第三方依赖）
+```
+
 ## 架构
 
 ```mermaid
@@ -72,49 +122,6 @@ flowchart LR
 ```
 
 分层细节见 `references/runtime.md`。
-
-## 安装与构建
-
-从 zip 分发的 skill 不含 `dist/`、`node_modules/`、`.runtime/`，必须自行构建：
-
-```bash
-cd project
-npm install
-npm run build
-```
-
-前置条件：Node.js >= 20；系统内可用 `py -3` 或 `python`。Python 依赖在首次实际调用工具时自举，构建期不安装。
-
-## MCP 配置
-
-```json
-{
-  "mcpServers": {
-    "computer-use-windows": {
-      "command": "node",
-      "args": [
-        "C:/Users/<user>/.agents/skills/computer-use-windows/project/dist/cli.js"
-      ],
-      "env": {
-        "COMPUTER_USE_DEBUG": "0",
-        "COMPUTER_USE_COORDINATE_MODE": "pixels"
-      }
-    }
-  }
-}
-```
-
-### 打包分发
-
-```bash
-python scripts/validate_skill.py .   # 先校验 skill 结构
-cd scripts
-python package_skill.py              # 生成 computer-use-windows.zip
-```
-
-打包会排除 `dist/`、`node_modules/`、`.runtime/`、`scripts/`、`README.md`、`LICENSE` —— 安装方需按上文自行构建。
-
-`validate_skill.py` 与本仓库外的通用校验器不同之处在于它显式按 UTF-8 读取，因此在中文 Windows（默认 GBK）上不会因非 ASCII 的 `description` 崩溃。
 
 ## 运行说明
 
@@ -169,12 +176,14 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - `request_access` 的候选应用清单是「注册表安装项 ∪ 当前有可见窗口的进程」，上限 50 个（超出会附 `... and N more`）。少数条目仍是不易读的文件名（如 `mspaint`、`store`、`devenv`），因为对应可执行文件没有版本资源可读。
 - `resolvePrepareCapture` 的 `focusBeforeAction` 选项沿用 macOS 实现，helper 忽略它；`autoResolve` 已实现（按已授权应用窗口所在屏选显示器）。
 - `check_permissions` 在 Windows 上恒返回已授权，因此 `tcc_not_granted` 分支不会触发。
-- 鼠标缓动默认**关闭**（光标瞬移）。只有少数需要"真实指针轨迹"的软件才值得开：`COMPUTER_USE_MOUSE_ANIMATION=1` 会按距离计算时长（2000 px/秒，上限 0.5 秒），代价是每次点击 / 拖拽 / 移动最多多等约 0.5 秒。
-- 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 0.4.0 一节的前提说明。
+- 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。
 
-### 与 0.1.x 的差异
+## 更新日志
 
-- `COMPUTER_USE_HIDE_BEFORE_ACTION` 更名为 `COMPUTER_USE_FOCUS_BEFORE_ACTION`（Windows 侧从不隐藏窗口）。旧名不再保留 —— 技能尚未发布，不存在需要兼容的存量配置。
+### 0.2.0：补齐 save_to_disk 与鼠标缓动，清理死代码
+
+- `COMPUTER_USE_HIDE_BEFORE_ACTION` 更名为 `COMPUTER_USE_FOCUS_BEFORE_ACTION`（Windows 侧从不隐藏窗口）。
+- 实现 `COMPUTER_USE_MOUSE_ANIMATION` 指针缓动：按距离计算 pyautogui 时长（2000 px/秒，上限 0.5 秒），每次动作前重新读取门控，中途改动即时生效。
 - `save_to_disk: true` 现在真的写盘：输出到 `%TEMP%\computer-use-windows\` 并在结果里返回绝对路径。
 - `list_granted_applications` 的返回值新增 `coordinateMode`，与工具描述一致。
 - 删除了 `inputLoader.ts` / `swiftLoader.ts` / `escHotkey.ts` / `drainRunLoop.ts` 四个遗留占位模块（调用即抛错，本 runtime 从未使用）。
@@ -197,7 +206,7 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 `request_access` 的候选清单此前只来自注册表，导致模型看不到 Store 应用（计算器就在屏上却拿不到名字），同时混入大量内部代号（`olk`、`msoasb`、`IEDIAGCMD`）。两项改动：
 
 - **显示名改取可执行文件的版本资源**（仅 `App Paths` 分支）：`olk` → `Microsoft Outlook`、`chrome` → `Google Chrome`、`EXCEL` → `Microsoft Excel`。Uninstall 分支不动 —— 它的 `DisplayName` 已是本地化的用户可见名称（`剪映专业版`、`阿里云盘`），用版本资源覆盖反而更差（→ `JianyingPro`、`aDrive`）。
-- **并入「当前有可见窗口的进程」**（新增 helper 命令 `list_window_apps`）：可见窗口是「这是用户能指认的应用」的最强信号，Store 应用由此进入清单。窗口来源的条目跳过安装路径白名单，否则 `D:\appsd\`、`C:\apps\` 下的便携应用会被丢掉。
+- **并入「当前有可见窗口的进程」**（新增 helper 命令 `list_window_apps`）：可见窗口是「这是用户能指认的应用」的最强信号，Store 应用由此进入清单。窗口来源的条目跳过安装路径白名单，否则 `D:\apps\`、`C:\apps\` 下的便携应用会被丢掉。
 
 实测：清单中出现 `Calculator`；抽样的 `Calculator`、`Notepad`、`Google Chrome`、`MuMu模拟器` 四个名称全部授权成功（中文名亦正常）。
 
@@ -224,10 +233,9 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 
 想"看清细节"请优先用 `zoom`：它把区域裁出来再放大，预算作用在那一小块上，同一屏幕面积的有效像素远高于整屏截图。
 
-### 0.4.1：缓动默认关闭、旧变量移除、补文档
+### 0.4.1：缓动默认关闭、补文档
 
 - **`COMPUTER_USE_MOUSE_ANIMATION` 改为默认关闭**（显式 `=1` 才开启）。缓动对普通点击没有价值，只对少数需要"真实指针轨迹"的软件有用（悬停才展开的菜单、监听移动的拖放目标），代价是每次点击最多多等约 0.5 秒。
-- **移除 `COMPUTER_USE_HIDE_BEFORE_ACTION` 旧名兼容**。技能尚未发布，不存在需要兼容的存量配置 —— 留着一个永远不会被读到的名字只会在环境变量表里误导人。
 - 文档新增**落点校验（hit-test）**一节：所有鼠标落点类工具在注入输入前会检查目标坐标下的应用，不在白名单或档位不足都会拒绝执行。
 - 修掉架构图在 Typora 里的 `Lexical error`：mermaid 10.1.0 的词法分析器不接受**未加引号的 `·`**，节点标签一律加引号即可（`/`、`-`、`+`、中文各自都没问题，是 `·` 触发的）。
 
@@ -245,30 +253,3 @@ check_permissions 实测 5 次: 246 / 221 / 220 / 238 / 221 ms   → 均值 229m
 同时清理了这个不可达分支上的谎话：报错原文是 `"Windows Accessibility and Screen Recording are now both granted."` —— macOS 词汇前直接拼了平台名，而 Windows 上既没有这两个权限，也没有那个面板。现在改为平台中立措辞（`input control` / `screen capture`），并在 Gate 2、`tcc_not_granted`、`tccState` 三处标注"Windows 上不可达"。
 
 分支**没有删除**，因为它是"平台前置条件"的正确接缝 —— Windows 上真实存在的是另一组问题：**会话 0 / 无交互桌面、RDP 断开、UAC 安全桌面**。代码里写明了：若把这些接进来，必须同时移除记忆化（那些状态会在运行期间变化）。
-
-## 项目结构
-
-```text
-SKILL.md               # 技能入口指引（agent 先读这个）
-README.md              # 本文件
-references/
-  tools.md             # 24 个 MCP 工具的完整参数与错误码
-  runtime.md           # 环境变量、helper 子命令、自举机制、分层说明
-  troubleshooting.md   # 常见故障定位与处置
-project/
-  src/
-    computer-use/      # Windows 适配层（executor / gates / pythonBridge / imageSave / 锁）
-    vendor/computer-use-mcp/  # 平台无关的 MCP 工具与门控框架
-  runtime/             # Windows Python helper 与依赖清单
-  dist/                # 构建产物（不随 zip 分发）
-  .runtime/            # 自举 venv 与依赖 stamp（不随 zip 分发）
-scripts/
-  package_skill.py     # 打包分发脚本
-  validate_skill.py    # skill 结构校验（UTF-8 安全，无第三方依赖）
-```
-
-## 路线图
-
-- 改进 Windows 应用身份识别与图标提取
-- 增加自动化 Windows 集成测试
-- 提供更易分发的本地 release 产物
