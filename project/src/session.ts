@@ -7,7 +7,7 @@ import type {
   ScreenshotDims,
 } from './vendor/computer-use-mcp/types.js'
 import { DEFAULT_GRANT_FLAGS } from './vendor/computer-use-mcp/types.js'
-import { checkComputerUseLock, tryAcquireComputerUseLock } from './computer-use/computerUseLock.js'
+import { checkComputerUseLock, releaseComputerUseLock, touchComputerUseLock, tryAcquireComputerUseLock } from './computer-use/computerUseLock.js'
 import { saveImageToDisk } from './computer-use/imageSave.js'
 
 type State = {
@@ -100,6 +100,11 @@ export function createSessionContext(): ComputerUseSessionContext {
         case 'free':
           return { holder: undefined, isSelf: false }
         case 'held_by_self':
+          // Heartbeat: every gated tool call (including the defer tools)
+          // refreshes the timestamp, so another session's idle-steal only
+          // fires when this session is truly dormant, not merely between
+          // tool calls.
+          await touchComputerUseLock()
           return { holder: process.env.CODEX_THREAD_ID ?? `pid-${process.pid}`, isSelf: true }
         case 'blocked':
           return { holder: result.by, isSelf: false }
@@ -111,6 +116,7 @@ export function createSessionContext(): ComputerUseSessionContext {
         throw new Error(`Computer use is locked by another session (${result.by}).`)
       }
     },
+    releaseCuLock: async () => releaseComputerUseLock(),
     formatLockHeldMessage: holder =>
       `Computer use is already in use by another session (${holder.slice(0, 8)}...).`,
   }

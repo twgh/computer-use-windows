@@ -97,7 +97,7 @@ Python 侧无需手动准备，也不会在构建期安装。
 
 ## 四、工具速查
 
-24 个工具（`teach_*` 系列在当前 CLI host 下不注册）。
+25 个工具（`teach_*` 系列在当前 CLI host 下不注册）。
 
 | 工具 | 必需参数 | 可选参数 | 说明 |
 | --- | --- | --- | --- |
@@ -122,6 +122,7 @@ Python 侧无需手动准备，也不会在构建期安装。
 | `open_application` | `app` | — | 启动或把应用带到前台；须已在白名单 |
 | `switch_display` | `display` | — | 切换截图目标显示器，或传 `auto` 复位 |
 | `list_granted_applications` | — | — | 查看白名单、授权 flag 与当前坐标模式 |
+| `release_lock` | — | — | 任务结束时释放桌面会话锁，让并发的另一个 agent 会话接管；未持锁时幂等成功 |
 | `read_clipboard` | — | — | 需 `clipboardRead` |
 | `write_clipboard` | `text` | — | 需 `clipboardWrite` |
 | `computer_batch` | `actions[]` | — | 单次调用执行动作序列 |
@@ -173,7 +174,7 @@ Python 侧无需手动准备，也不会在构建期安装。
 
 说明：自带 CLI host 使用自动批准实现（`project/src/session.ts`），因此 `request_access` 会直接返回 `granted`，不需要人工确认弹窗；若宿主客户端自带审批层，则以客户端为准。
 
-**单会话独占**：同一时刻只允许一个 computer-use 会话操作桌面，锁文件位于 `~/.computer-use-windows/computer-use.lock`。被其他活动会话持有时，工具返回 `cu_lock_held`。判定"同一会话"的身份取自 `CODEX_THREAD_ID`，缺失时退化为 `pid-<pid>`。锁持有进程退出后锁会自动回收。
+**单会话独占**：同一时刻只允许一个 computer-use 会话操作桌面，锁文件位于 `~/.computer-use-windows/computer-use.lock`。被其他活动会话持有时，工具返回 `cu_lock_held`。判定"同一会话"的身份取自 `CODEX_THREAD_ID`，缺失时退化为 `pid-<pid>`。锁的三条释放路径：持有进程退出后自动回收；任务结束时主动调 `release_lock`（**推荐收尾动作**）；持有者持续闲置超过空闲阈值（`COMPUTER_USE_LOCK_IDLE_SECS`，默认 300 秒）后被其他会话接管。
 
 ## 七、平台限制
 
@@ -194,6 +195,6 @@ Python 侧无需手动准备，也不会在构建期安装。
 
 ## 九、参考文件
 
-- `references/tools.md` —— 24 个 MCP 工具的完整参数与返回结构、`computer_batch` 动作 schema、错误码表。
+- `references/tools.md` —— 25 个 MCP 工具的完整参数与返回结构、`computer_batch` 动作 schema、错误码表。
 - `references/runtime.md` —— 全部环境变量、Python helper 子命令、venv 自举机制、目录结构与数据落点。
 - `references/troubleshooting.md` —— 构建 / 自举 / 输入 / 多屏 / 提权等常见故障的定位与处置。

@@ -228,6 +228,10 @@ export function bindSessionContext(
       // above already ran.
       checkCuLock: undefined,
       acquireCuLock: undefined,
+      // Unlike check/acquire, release is consumed by a TOOL handler
+      // (`release_lock`), not by the gate — so it threads through instead of
+      // being nulled out here.
+      releaseCuLock: ctx.releaseCuLock,
       isAborted: ctx.isAborted,
     };
 
@@ -262,7 +266,7 @@ export function createComputerUseMcpServer(
   const { serverName, logger } = adapter;
 
   const server = new Server(
-    { name: serverName, version: "0.4.2" },
+    { name: serverName, version: "0.5.0" },
     { capabilities: { tools: {}, logging: {} } },
   );
 

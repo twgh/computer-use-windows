@@ -374,6 +374,10 @@ export interface ComputerUseSessionContext {
   /** Take the lock. Called when `checkCuLock` returned `holder: undefined`
    *  on a non-deferring tool. Host emits enter-CU signals here. */
   acquireCuLock?(): Promise<void>;
+  /** Give up the lock for this session. Awaited by the `release_lock` tool.
+   *  Returns true when a held lock was released, false when nothing was held
+   *  by this session. Undefined → `release_lock` reports it as unsupported. */
+  releaseCuLock?(): Promise<boolean>;
   /** Host-specific lock-held error text. Default is the package's generic
    *  message. The CLI host includes the holder session-ID prefix. */
   formatLockHeldMessage?(holder: string): string;
@@ -546,6 +550,14 @@ export interface ComputerUseOverrides {
    * short-circuited). Host emits an event the overlay listens to.
    */
   acquireCuLock?: () => void;
+
+  /**
+   * Explicitly give up the desktop lock. Wired from
+   * `ComputerUseSessionContext.releaseCuLock` by `bindSessionContext`;
+   * consumed only by the `release_lock` tool. Undefined → that tool returns
+   * feature_unavailable rather than pretending to release.
+   */
+  releaseCuLock?: () => Promise<boolean>;
 
   /**
    * User-abort signal. Checked mid-iteration inside `handleComputerBatch`

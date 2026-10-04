@@ -747,6 +747,8 @@ async function releaseHeldMouse(
  * `list_granted_applications` hit the CHECK (so a blocked session doesn't
  * show an approval dialog for access it can't use) but defer ACQUIRE — the
  * enter-CU notification/overlay only fires on the first action tool.
+ * `release_lock` defers for the opposite reason: it must never ACQUIRE a
+ * lock as a side effect of being called to give one up.
  *
  * `request_teach_access` is NOT here: approving teach mode hides the main
  * window, and the lock must be held before that. See Gate-3 block in
@@ -758,7 +760,8 @@ async function releaseHeldMouse(
 export function defersLockAcquire(toolName: string): boolean {
   return (
     toolName === "request_access" ||
-    toolName === "list_granted_applications"
+    toolName === "list_granted_applications" ||
+    toolName === "release_lock"
   );
 }
 
@@ -3002,6 +3005,34 @@ function handleListGrantedApplications(
   });
 }
 
+/**
+ * `release_lock` — give up the desktop lock so a concurrently running session
+ * can take over. Complements the lock's idle-steal: the agent ends its task
+ * proactively instead of leaving the lock pinned until idle recovery.
+ *
+ * Reached only when the lock is free or held by self (the async gate in
+ * bindSessionContext blocks on a foreign holder first). Both remaining cases
+ * are success paths — releasing a lock nobody holds is idempotent, not an
+ * error, so the model doesn't retry.
+ */
+async function handleReleaseLock(
+  overrides: ComputerUseOverrides,
+): Promise<CuCallToolResult> {
+  if (!overrides.releaseCuLock) {
+    return errorResult(
+      "release_lock is not supported by this host — the desktop lock is managed outside this server.",
+      "feature_unavailable",
+    );
+  }
+  const released = await overrides.releaseCuLock();
+  return okText(
+    released
+      ? "Computer-use lock released. Other agent sessions can now drive the desktop. " +
+          "If you need it again, call an action tool — the lock is re-acquired automatically when free."
+      : "No computer-use lock is held by this session — nothing to release.",
+  );
+}
+
 async function handleReadClipboard(
   adapter: ComputerUseHostAdapter,
   overrides: ComputerUseOverrides,
@@ -3558,6 +3589,9 @@ async function dispatchAction(
 
     case "list_granted_applications":
       return handleListGrantedApplications(overrides);
+
+    case "release_lock":
+      return handleReleaseLock(overrides);
 
     case "read_clipboard":
       return handleReadClipboard(adapter, overrides, subGates);

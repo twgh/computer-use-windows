@@ -1,4 +1,4 @@
-# Windows 电脑使用 Skill 0.4.2
+# Windows 电脑使用 Skill 0.5.0
 
 ## 项目定位
 
@@ -46,11 +46,11 @@
 
 ## 暴露的 MCP 工具
 
-共 24 个（`teach_*` 系列在当前 CLI host 下不注册）：
+共 25 个（`teach_*` 系列在当前 CLI host 下不注册）：
 
 | 分类 | 工具 |
 | --- | --- |
-| 会话与权限 | `request_access`、`list_granted_applications` |
+| 会话与权限 | `request_access`、`list_granted_applications`、`release_lock` |
 | 截图 | `screenshot`、`zoom` |
 | 鼠标 | `left_click`、`double_click`、`triple_click`、`right_click`、`middle_click`、`left_click_drag`、`mouse_move`、`scroll`、`left_mouse_down`、`left_mouse_up`、`cursor_position` |
 | 键盘 | `type`、`key`、`hold_key` |
@@ -132,6 +132,7 @@ flowchart LR
 | `COMPUTER_USE_ENABLED` | `0` 禁用 | 启用 | 全局开关；禁用时工具列表为空 |
 | `COMPUTER_USE_COORDINATE_MODE` | `pixels` \| `normalized_0_100` | `pixels` | 坐标语义 |
 | `COMPUTER_USE_DEBUG` | `1` 开启 | 关闭 | 调试日志输出到 stderr |
+| `COMPUTER_USE_LOCK_IDLE_SECS` | 非负整数 | `300` | 会话锁空闲接管阈值（秒）；持有者闲置超过该时长后其他会话可接管，`0` 禁用接管 |
 
 前两项在进程启动时读取一次，改动后需重启 server。完整变量表（含子开关）见 `references/runtime.md`。
 
@@ -144,7 +145,7 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - 会话 / 远程桌面边界
 - 应用自身的反自动化限制
 
-此外，桌面同一时刻只允许一个 computer-use 会话操作，锁文件位于 `~/.computer-use-windows/computer-use.lock`。
+此外，桌面同一时刻只允许一个 computer-use 会话操作，锁文件位于 `~/.computer-use-windows/computer-use.lock`。锁的释放有三条路：持有进程退出后自动回收；agent 任务结束时主动调 `release_lock`；持有者进程还活着但持续闲置（心跳超过 `COMPUTER_USE_LOCK_IDLE_SECS`，默认 300 秒）时被其他会话接管 —— 两个 IDE 常驻、其中一个不再使用 desktop 的场景不会再永久占锁。生命周期细节见 `references/runtime.md`「会话锁」。
 
 ### 会话模型
 
@@ -179,6 +180,17 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。
 
 ## 更新日志
+
+### 0.5.0：会话锁可释放了（心跳空闲接管 + `release_lock`）
+
+v0.4.x 的锁一旦获取就持有到 server 进程退出：两个 IDE 同时开着，先做过一次 desktop 操作的那个会永久占锁，另一个永远拿到 `cu_lock_held` —— 即使它早就不再使用桌面。本次两项改进，互补：
+
+- **心跳 + 空闲接管**：锁文件新增 `lastHeartbeat` 字段，本会话每次经过锁门控都刷新（`touchComputerUseLock`）。持有者进程还活着但心跳超过 `COMPUTER_USE_LOCK_IDLE_SECS`（默认 300 秒，`0` 禁用）时，其他会话的 check/acquire 将其视为 stale 回收并接管。活跃会话的每次工具调用都在刷新心跳，不会中途被抢 —— 粘住的只是真正闲置的会话。
+- **`release_lock` 工具**（第 25 个工具）：agent 任务结束时主动放锁，不等空闲兜底。幂等：未持锁时返回「nothing to release」而非错误；锁被其他会话持有时照常在门控处报 `cu_lock_held`。释放后需要桌面时直接调动作工具即可自动重新获取。
+
+兼容性：pre-0.5.0 的锁文件没有心跳字段，视为「无闲置证据」，不会被接管（避免抢活蹦乱跳的旧版本会话），进程退出回收照旧。锁的获取时机不变（首个动作工具，`request_access` 等仍是 defer）。
+
+实测：锁语义 11 项断言（获取 / 自见 / 阻塞 / 空闲接管 / 被抢后原持有者阻塞 / 释放 / 幂等 / 旧锁不接管）+ MCP stdio 全链路 11 项（25 工具注册、截图持锁、release 删文件、幂等、再获取）全部通过。
 
 ### 0.2.0：补齐 save_to_disk 与鼠标缓动，清理死代码
 

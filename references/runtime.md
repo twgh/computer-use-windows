@@ -32,7 +32,7 @@ scripts/
 | --- | --- | --- |
 | `project/.runtime/venv/` | 自举出的 Python 虚拟环境 | 首次真正调用工具时创建 |
 | `project/.runtime/requirements.sha256` | `requirements.txt` 的 SHA-256 记录 | 与当前文件不一致才重装依赖 |
-| `~/.computer-use-windows/computer-use.lock` | 会话锁（JSON：`{sessionId, pid}`） | `O_EXCL` 独占创建；持有进程退出后自动回收 |
+| `~/.computer-use-windows/computer-use.lock` | 会话锁（JSON：`{sessionId, pid, lastHeartbeat}`） | `O_EXCL` 独占创建；持有进程退出后自动回收；心跳超过空闲阈值后可被其他会话接管 |
 | `%TEMP%\computer-use-windows\` | `save_to_disk: true` 保存的截图 | 仅在显式请求落盘时写入，文件名 `<screenshot\|zoom>-<时间戳>-<序号>.jpg` |
 
 除此之外 runtime 不写任何文件：日志只写 stderr，截图默认以 MCP image content 返回。落盘目录刻意不在 skill / project 树内 —— `.runtime/` 只留给自举 venv。
@@ -91,6 +91,18 @@ scripts/
 | --- | --- |
 | `CODEX_THREAD_ID` | 会话身份 ID，用于判定"锁是否由自己持有"；缺失时退化为 `pid-<pid>` |
 | `PYTHONDONTWRITEBYTECODE` / `PYAUTOGUI_HIDE_SUPPORT_PROMPT` | Python 侧噪声抑制，helper 内 `setdefault` 为 `1` |
+
+### 会话锁
+
+桌面同一时刻只允许一个会话操作，实现在 `project/src/computer-use/computerUseLock.ts`。生命周期：
+
+1. **获取**：首个非 defer 工具（`request_access` / `list_granted_applications` / `release_lock` 只检查不获取）通过门控时 `O_EXCL` 独占创建锁文件。
+2. **心跳**：本会话每次经过锁门控（含 defer 工具）都刷新 `lastHeartbeat`（`touchComputerUseLock`，尽力而为，失败只让锁更早可被接管）。
+3. **释放**：三条路 —— 持有进程退出（PID 探活失败 → 自动回收）；agent 主动调 `release_lock`；**空闲接管** —— 持有者进程还活着但心跳超过 `COMPUTER_USE_LOCK_IDLE_SECS`（默认 300 秒），其他会话的 check/acquire 会把它当 stale 处理（删除并重建）。
+
+设计取向：心跳粘住的是「真正闲置」的会话（两个 IDE 常驻、其中一个早就不用的场景）；活跃会话的每次工具调用都在刷新心跳，不会被中途抢走。`0` 完全禁用空闲接管；pre-0.5.0 的旧锁文件没有心跳字段，视为「无闲置证据」，同样不接管。
+
+已知边界：单次工具调用内部的耗时动作（超长 `wait`、超长 batch）期间心跳不刷新，动作时长超过空闲阈值时理论上可被接管；输入注入本身仍受每次动作前的锁门控约束，不会出现两个会话同时注入。
 
 ## 启动流程
 

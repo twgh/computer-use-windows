@@ -448,6 +448,20 @@ export function buildComputerUseTools(
     },
 
     {
+      name: "release_lock",
+      description:
+        "Release this session's lock on the desktop. Only one agent session can drive the mouse/keyboard/screens at a time; " +
+        "call this when your computer-use task is finished (or paused for an extended period) so a concurrently running session " +
+        "can take over. If you need the desktop again later, just call an action tool — the lock is re-acquired automatically " +
+        "when it is free.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+        required: [],
+      },
+    },
+
+    {
       name: "read_clipboard",
       description:
         "Read the current clipboard contents as text. Requires the `clipboardRead` grant.",

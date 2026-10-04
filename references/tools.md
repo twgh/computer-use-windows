@@ -2,7 +2,7 @@
 
 本文件是 `SKILL.md` 的深度参考。工具 schema 定义于 `project/src/vendor/computer-use-mcp/tools.ts`，分发与门控逻辑在 `project/src/vendor/computer-use-mcp/toolCalls.ts`。
 
-共 24 个工具。`teach_step` / `teach_batch` / `request_teach_access` 仅在 capabilities 带 `teachMode` 时注册，当前 CLI host（`project/src/computer-use/common.ts`）未开启，因此不可用。
+共 25 个工具。`teach_step` / `teach_batch` / `request_teach_access` 仅在 capabilities 带 `teachMode` 时注册，当前 CLI host（`project/src/computer-use/common.ts`）未开启，因此不可用。
 
 ## 通用约定
 
@@ -54,6 +54,21 @@
   "coordinateMode": "pixels"
 }
 ```
+
+### `release_lock`
+
+无参数。主动放弃本会话持有的桌面会话锁，让并发运行的另一个 agent 会话（如另一个 IDE 的 server 实例）可以接管桌面。两个场景调用：
+
+- 任务结束时主动调用 —— 这是正确的收尾姿势，不要等空闲接管兜底；
+- 报错 `cu_lock_held` 且提示符是本会话历史行为导致时，先释放再重试。
+
+行为：
+
+- 本会话持锁 → 释放并返回确认文本；锁文件随之删除。
+- 本会话未持锁 → 幂等成功，返回「nothing to release」，模型无需重试。
+- 锁被**其他**会话持有 → 在门控处返回 `cu_lock_held` 错误（释放别人的锁既不可能也无意义）。
+- 释放后如需继续操作桌面，直接调用任意动作工具即可 —— 锁空闲时会自动重新获取。
+- 该工具只检查锁、从不获取锁（与 `request_access` 同属 defer 集合）。
 
 ## 截图
 
