@@ -177,6 +177,7 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - `request_access` 的候选应用清单是「注册表安装项 ∪ 当前有可见窗口的进程」，上限 50 个（超出会附 `... and N more`）。少数条目仍是不易读的文件名（如 `mspaint`、`store`、`devenv`），因为对应可执行文件没有版本资源可读。
 - `resolvePrepareCapture` 的 `focusBeforeAction` 选项沿用 macOS 实现，helper 忽略它；`autoResolve` 已实现（按已授权应用窗口所在屏选显示器）。
 - `check_permissions` 在 Windows 上恒返回已授权，因此 `tcc_not_granted` 分支不会触发。
+- 控制台窗口归 `WindowsTerminal.exe` / `conhost.exe`，不是 shell 进程；宿主的父进程是 `svchost`、shell 不在其子树里，没有可靠的窗口→shell 映射可穿透（猜错就是把输入送进另一个可能已提权的 shell）。因此授权 shell 不能操作终端窗口，门控会给出专门说明；`open_application` 退化为聚焦宿主窗口，多 tab 时可见的那个未必是目标。
 - 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。
 
 ## 更新日志

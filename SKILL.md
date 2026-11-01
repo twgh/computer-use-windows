@@ -180,6 +180,7 @@ Python 侧无需手动准备，也不会在构建期安装。
 
 - **截图不做过滤**：runtime 上报 `screenshotFiltering: none`，屏幕上所有窗口都会出现在截图里。动作门控由 MCP 层承担，不是 compositor 原生能力。因此**不要把敏感内容暴露给不需要它的任务**。
 - **不隐藏窗口**：动作前只会把已授权应用窗口置前，不会隐藏白名单外的窗口（与 macOS 实现不同）。若有非白名单窗口挡在目标上，需要显式切换前台。
+- **控制台应用要授权宿主，不是 shell**：Windows 终端窗口归 `WindowsTerminal.exe`（旧式是 `conhost.exe`），授权 `powershell.exe` / `pwsh.exe` 之后仍然无法操作，门控会报 `"Windows Terminal Host" is not in the allowed applications` 并说明原因。此时按提示授权宿主可拿到 `click` 档控制，或者**改用自己的 shell 工具跑命令** —— 后者几乎总是更好的选择。
 - **UIPI 提权边界**：目标窗口是管理员权限而 runtime 不是时，Windows 会拦截输入注入，helper 会显式报错并提示以管理员身份运行 runtime。截屏与窗口管理不受影响。
 - **UAC 安全桌面**：切到安全桌面期间无法截屏或注入输入。
 - **远程桌面 / 会话边界**：RDP 断开的会话中桌面不可操作。
