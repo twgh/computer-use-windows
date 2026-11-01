@@ -244,6 +244,7 @@ Windows 特例：桌面窗口归属 `explorer.exe`（显示名可能是「Window
 行为：
 
 - 顺序执行，**首个出错的动作即停止**。
+- 停止时**不会回滚已执行的动作**：若批次里 `left_mouse_down` 之后某个动作失败，左键会保持按住状态（实测：`[mouse_move, left_mouse_down, left_mouse_down]` 在第三次报 `mouse button already held` 并停止，末尾的 `left_mouse_up` 不会执行）。把 `left_mouse_up` 放在批次里**不能**当作兜底 —— 失败后必须单独调用它释放。
 - 返回 JSON：全部成功为 `{ "completed": [...] }`；中途失败为 `{ "completed": [...], "failed": { "action": ..., "index": ..., "error": ... }, "remaining": <未执行数量> }`。
 - 每个动作前都会重新校验前台应用白名单；若某动作打开了非白名单应用，下一个动作的门控会失败并终止批处理。
 - 批内允许插入 `screenshot` 用于观察，但**后续点击坐标仍以批处理前的全屏截图为基准**。

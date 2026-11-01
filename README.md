@@ -188,7 +188,7 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - **`conhost.exe` 归入 terminal 分类。** 它的显示名「Console Window Host」不含 "terminal" 子串，此前落到默认分类拿到 **full 档 = 完整键盘进 shell**。补了 `conhost` 与 `console window host` 两个精确子串，没加裸词 "console"。
 - **`scripts/set_version.py`** —— `--show` / `--check` / `<版本>` 三种模式，一次同步 SKILL.md frontmatter、package.json、MCP serverInfo 字面量、README 标题四处。`--check` 在漂移时退出码 1，可以挂到发布前。版本号此前纯靠人工四处改，0.5.0 就漏过一处。
 
-实测：`focused` 与 `launched` 两条文本实机观察到（`Brought "Notepad++ (64-bit x64)" to the front.` / `Opened "Notepad".`）；`open_application("Notepad++")` 在 `Notepad` 同时已授权的会话下唯一命中，反向包含修复确认；`getDeniedCategoryForApp` 对 conhost 与 Windows Terminal 均返回 `terminal`、对 Notepad++ 返回 `null`；`set_version.py` 三模式跑通，四处一致。`present` 分支需要 Windows 真的拒绝一次焦点变更，未能稳定复现，仅经代码与文本核对。`npm run build` / `check` / `validate_skill.py` 通过。
+实测：`focused` 与 `launched` 两条文本实机观察到（`Brought "Notepad++ (64-bit x64)" to the front.` / `Opened "Notepad".`）；`open_application("Notepad++")` 在 `Notepad` 同时已授权的会话下唯一命中，反向包含修复确认；`getDeniedCategoryForApp` 对 conhost 与 Windows Terminal 均返回 `terminal`、对 Notepad++ 返回 `null`；`set_version.py` 三模式跑通，四处一致。`present` 分支也已实机观察到 —— 就是被 `alt+tab` 切走前台之后自然复现的：Windows 拒绝后台进程把 Notepad 提回来，工具按新行为报 `state_conflict` 并说明「不要再调用、先截图看真实前台」。四种结果里只剩 `void`（本 host 总能区分）未触发。`npm run build` / `check` / `validate_skill.py` 通过。
 
 ### 0.5.2：注册表路径展开、抢焦点不再抛异常、`open_application` 的名字与控制台窗口
 
