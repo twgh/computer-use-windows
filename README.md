@@ -1,4 +1,4 @@
-# Windows 电脑使用 Skill 0.5.1
+# Windows 电脑使用 Skill 0.5.2
 
 ## 项目定位
 
@@ -180,6 +180,18 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。
 
 ## 更新日志
+
+### 0.5.2：注册表路径展开、抢焦点不再抛异常、`open_application` 的名字与控制台窗口
+
+0.5.1 发布后拿一个 XCGUI 自绘应用做回归，撞出一串既有缺陷，全部修掉。共同特征是「工具说成功、实际什么都没发生」或者反过来。
+
+- **注册表路径先展开环境变量**（`expand_registry_path`）。PowerShell 的 App Paths 默认值是 `%systemroot%\system32\...`，而授权比对用的是进程镜像路径（永远是全展开的），于是这条 bundleId 匹配不上任何运行中的进程：应用显示为已授权却完全不可操作，`focus_existing_window` 找不到窗口，`prepare_for_action` 还会转而去聚焦别的应用。顺带 `file_description` 才第一次读得动，显示名从退化的 `PowerShell` 变成真实的「Windows PowerShell」。
+- **`_force_foreground` 返回 bool 且不再抛异常**。原先只有第一次 `SetForegroundWindow` 有兜底，`AttachThreadInput` 之后的第二次没有 —— 而后台进程抢不到前台是常态，于是每个输入动作都可能把原始 pywin32 元组甩给模型：`Tool "left_click" failed: (0, 'SetForegroundWindow', ...)`。现在 `prepare_for_action` 忽略结果（紧随其后的前台门控会重读真实前台并报出正确的 `app_not_granted`），`focus_existing_window` 透传结果，让 `open_application` 能为「已置前」说真话。
+- **`open_application` 的名字解析与 `request_access` 对齐**。旧实现要求显示名精确相等，而 `request_access` 是宽松解析的：授权 `Notepad++` 记成 `Notepad++ (64-bit x64)` 之后，`open_application("Notepad++")` 被拒，错误还说「call request_access first」，把模型推进重新授权的循环。现在是 bundleId → 精确 → 松匹配（显示名互为子串或等于可执行文件名）→ **多命中拒绝猜测**（`bad_args` 列出候选）→ 无命中列出已授权名字。
+- **控制台应用**：窗口归 `WindowsTerminal.exe`，shell 不在其子树里（宿主父进程是 `svchost`），没有可靠的窗口→shell 映射，猜错就是把输入送进另一个可能已提权的 shell —— 所以不做 `resolve_window_pid` 那种穿透，改由 `consoleHostNote()` 在前台门控与落点校验处说清情况；同时 `open_application` 匹配不到窗口时改为聚焦宿主窗口，不再每次新开一个 tab。
+- **`open_app` 的两条 `Popen` 兜底 `DEVNULL` 掉 stdio**。bridge 用 `execFile`，resolve 时机是所有 stdio 流 EOF 而非 helper 退出；被启动的程序继承 stdout 句柄会让工具一直挂到客户端超时（`-32603 did not complete`），而应用其实已经打开。`os.startfile` 不下传句柄，所以只有兜底分支会中招 —— 也正是第一条那个未展开路径逼出来的。
+
+实测：`scroll` 四方向（down/up 幅度线性、left/right 借关闭自动换行的 Notepad++ 确认行首滚出与滑块位移）；`allowlist_empty`、两处 `app_not_granted`（含控制台宿主专门文案）、`tier_insufficient`、`cu_lock_held` 全部实机触发并核对文本；`open_application` 的精确 / 松匹配 / 歧义 / 无命中四条分支各自跑通；控制台应用连续两次 `open_application` 后进程与窗口数不变（修复前每次多一个）。`npm run build` / `check` 与 `validate_skill.py` 通过。
 
 ### 0.5.1：修好 `scroll` 的滚轮量，并让门控错误自己指路
 

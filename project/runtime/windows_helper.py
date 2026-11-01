@@ -743,6 +743,22 @@ def _strip_icon_index(path: str) -> str:
     return path
 
 
+def expand_registry_path(path: str) -> str:
+    """Resolve environment variables inside a registry-supplied path.
+
+    Uninstall `DisplayIcon` and App Paths defaults routinely carry variables —
+    PowerShell's App Paths default is `%systemroot%\\system32\\WindowsPowerShell\\
+    v1.0\\powershell.exe`. Grants are matched against the live process image
+    path, which is always fully expanded, so an unexpanded value becomes a
+    bundleId no running process can ever equal: the app shows up as granted and
+    is then unoperatable (input gates reject it, `focus_existing_window` finds
+    no window, and `prepare_for_action` goes off hunting a different app).
+    `expandvars` leaves unknown variables untouched, which still beats dropping
+    the entry from the candidate list entirely.
+    """
+    return os.path.expandvars(path)
+
+
 def extract_exe_from_command(command: str | None) -> str | None:
     if not command:
         return None
@@ -752,9 +768,9 @@ def extract_exe_from_command(command: str | None) -> str | None:
     if command.startswith('"'):
         end = command.find('"', 1)
         if end > 1:
-            return _strip_icon_index(command[1:end])
+            return expand_registry_path(_strip_icon_index(command[1:end]))
     parts = command.split()
-    return _strip_icon_index(parts[0]) if parts else None
+    return expand_registry_path(_strip_icon_index(parts[0])) if parts else None
 
 
 def collect_registry_apps(root, subkey: str, out: dict[str, dict[str, Any]]) -> None:
@@ -771,7 +787,7 @@ def collect_registry_apps(root, subkey: str, out: dict[str, dict[str, Any]]) -> 
                 display_icon = read_reg_value(root, child, "DisplayIcon")
                 app_path = extract_exe_from_command(display_icon)
                 if not app_path and install_location:
-                    candidate_dir = Path(install_location)
+                    candidate_dir = Path(expand_registry_path(install_location))
                     if candidate_dir.exists():
                         exe_candidates = sorted(candidate_dir.glob("*.exe"))
                         if exe_candidates:
@@ -794,6 +810,7 @@ def collect_app_paths(root, subkey: str, out: dict[str, dict[str, Any]]) -> None
                 app_path = read_reg_value(root, child, "")
                 if not app_path:
                     continue
+                app_path = expand_registry_path(app_path.strip())
                 identifier = os.path.normcase(app_path)
                 # Version resource first: this branch has no DisplayName to
                 # prefer, and the raw stem is what produced names like `olk`.
@@ -841,6 +858,42 @@ def running_apps() -> list[dict[str, Any]]:
     return sorted(results.values(), key=lambda item: item["displayName"].lower())
 
 
+CONSOLE_HOST_EXES = {"windowsterminal.exe", "wt.exe", "conhost.exe", "openconsole.exe"}
+
+
+def _console_host_window() -> int | None:
+    """Topmost visible window owned by a terminal host process, if any."""
+    found: list[int] = []
+
+    def cb(hwnd: int, _lparam: int) -> bool:
+        if not win32gui.IsWindowVisible(hwnd):
+            return True
+        if not (win32gui.GetWindowText(hwnd) or "").strip():
+            return True
+        path = get_process_path(resolve_window_pid(hwnd))
+        if path and os.path.basename(os.path.normcase(path)) in CONSOLE_HOST_EXES:
+            found.append(hwnd)
+        return True
+
+    win32gui.EnumWindows(cb, None)
+    return found[0] if found else None
+
+
+def _process_running(image_path: str) -> bool:
+    wanted = os.path.normcase(image_path)
+    try:
+        for proc in psutil.process_iter(["exe"]):
+            try:
+                exe = proc.info.get("exe")
+            except Exception:
+                continue
+            if exe and os.path.normcase(exe) == wanted:
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def focus_existing_window(bundle_id: str) -> bool:
     """Focus a window that already belongs to this app, if there is one.
 
@@ -870,14 +923,29 @@ def focus_existing_window(bundle_id: str) -> bool:
     except Exception:
         return False
     if not found:
-        return False
-    hwnd = found[0]
+        # Console clients own no window of their own — Windows Terminal hosts
+        # them, so the HWND belongs to the host and the exact-path match above
+        # can never succeed. Without this fallback every open_application on a
+        # shell launched yet another tab. Bringing the host window forward is
+        # the closest honest reading of "bring the app to the front", and it is
+        # not a way to drive a session the user never approved: input is gated
+        # separately on the frontmost process, which stays the host. Residual
+        # imprecision: with several tabs, the visible one may not be the
+        # granted app's.
+        if not _process_running(wanted):
+            return False
+        hwnd = _console_host_window()
+        if hwnd is None:
+            return False
+    else:
+        hwnd = found[0]
     try:
         if win32gui.IsIconic(hwnd):
             win32gui.ShowWindow(hwnd, SW_RESTORE)
             time.sleep(0.05)
-        _force_foreground(hwnd)
-        return True
+        # Propagated, not swallowed: `open_application` on an already-running app
+        # promises "brought to the front", so it has to be able to say it failed.
+        return _force_foreground(hwnd)
     except Exception:
         return False
 
@@ -919,11 +987,20 @@ def open_app(bundle_id: str) -> None:
     if os.path.exists(target):
         os.startfile(target)
         return
+    # Both remaining paths must not inherit this process's stdio. The bridge
+    # reads the helper with execFile, which resolves on 'close' — every stdio
+    # stream at EOF — not on the helper's own exit. A launched app holding the
+    # inherited stdout handle keeps that stream open for its whole lifetime, so
+    # the tool call hung until the client timed out with `-32603 did not
+    # complete` while the app had in fact opened. `os.startfile` is immune
+    # (ShellExecute passes no handles down), which is why only the fallbacks
+    # ever showed it.
+    detached = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     resolved = shutil.which(target)
     if resolved:
-        subprocess.Popen([resolved])
+        subprocess.Popen([resolved], **detached)
         return
-    subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
+    subprocess.Popen(["cmd", "/c", "start", "", target], shell=False, **detached)
 
 
 def read_clipboard() -> str:
@@ -1147,10 +1224,21 @@ def restore_window(hwnd: int) -> None:
         pass
 
 
-def _force_foreground(hwnd: int) -> None:
+def _force_foreground(hwnd: int) -> bool:
+    """Bring `hwnd` forward, reporting whether it actually got there.
+
+    Never raises. A focus-steal refusal is the *normal* outcome for a
+    background process, and this runs on every input action via
+    `prepare_for_action` — an escaping pywin32 error reached the model as
+    `Tool "left_click" failed: (0, 'SetForegroundWindow', 'No error message is
+    available')`, which reads as a broken tool and carries nothing to act on.
+    `prepare_for_action` deliberately ignores the result: the frontmost gate
+    re-reads the real foreground immediately afterwards, so the failure surfaces
+    there as a proper `app_not_granted` instead.
+    """
     try:
         win32gui.SetForegroundWindow(hwnd)
-        return
+        return True
     except Exception:
         pass
     # Background processes are not allowed to steal focus — attach to the
@@ -1163,6 +1251,9 @@ def _force_foreground(hwnd: int) -> None:
     user32.AttachThreadInput(cur_tid, target_tid, True)
     try:
         win32gui.SetForegroundWindow(hwnd)
+        return True
+    except Exception:
+        return False
     finally:
         user32.AttachThreadInput(cur_tid, fg_tid, False)
         user32.AttachThreadInput(cur_tid, target_tid, False)

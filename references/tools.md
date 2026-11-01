@@ -175,6 +175,14 @@ Windows 特例：桌面窗口归属 `explorer.exe`（显示名可能是「Window
 
 把应用带到前台，未运行则启动。目标应用必须已在会话白名单中（先 `request_access`）。
 
+`app` 的解析顺序（只在**已授权集合**内匹配，不查安装表，避免热路径上的 `listInstalledApps()` 开销）：
+
+1. 传入的正是已授权的 bundleId → 直接用；
+2. 显示名精确匹配（大小写不敏感）；
+3. 松匹配：显示名互为子串，或等于 bundleId 的可执行文件名（去 `.exe`）—— 这样 `Notepad++` 能找到 `Notepad++ (64-bit x64)`、`pwsh` 能找到 `PowerShell 7`，与 `request_access` 的宽松解析对齐；
+4. 松匹配命中**多个** → 返回 `bad_args` 并列出候选，绝不静默挑一个（两者的 tier 与"用户以为批准了什么"可能不同）；
+5. 一个都不匹配 → 返回 `app_not_granted`，并把当前已授权的显示名列出来。旧文案在这里只会说「call request_access first」，而应用往往只是名字没对上，于是模型被推进重新授权的循环。
+
 ### `switch_display`
 
 | 参数 | 类型 | 必需 | 说明 |

@@ -354,6 +354,30 @@ const TIER_ANTI_SUBVERSION =
   "the user to perform it.";
 
 /**
+ * Console windows belong to the terminal host process, not to the shell running
+ * inside them. On Windows 11 24H2 the host is parented by svchost and the
+ * client is nowhere in its subtree, so there is no reliable window→shell
+ * mapping to resolve — guessing one would route input into a different,
+ * possibly elevated, shell. A grant for the shell therefore never covers the
+ * window, and the generic "it may have appeared since your last one" leaves the
+ * model facing a mystery. Returns "" for non-terminal apps so the caller can
+ * fall back to the standard guidance.
+ */
+function consoleHostNote(
+  bundleId: string,
+  displayName: string,
+): string {
+  if (getDeniedCategoryForApp(bundleId, displayName) !== "terminal") return "";
+  return (
+    ` This is a console window owned by the terminal host, not by the shell ` +
+    `running inside it, and the OS exposes no reliable window→shell mapping — ` +
+    `so granting the shell can never cover this window. Grant ` +
+    `"${displayName}" for terminal-tier (click) control of it, or run the ` +
+    `command in your own shell tool instead of driving the desktop.`
+  );
+}
+
+/**
  * Appended to the three errors that fire on a cold session. An agent that
  * skipped the skill doc hits exactly these, and a bare "not allowed" reads as
  * a broken tool — clients often surface that to the user and stop. So each one
@@ -579,9 +603,10 @@ async function runInputActionGates(
   // something popped up between prepare and action, or the 5-try loop gave up.
   return errorResult(
     `"${frontmost.displayName}" is not in the allowed applications and is ` +
-      `currently in front. Take a new screenshot — it may have appeared ` +
-      `since your last one.` +
-      ACCESS_GATE_GUIDANCE,
+      `currently in front.` +
+      (consoleHostNote(frontmost.bundleId, frontmost.displayName) ||
+        ` Take a new screenshot — it may have appeared since your last one.` +
+          ACCESS_GATE_GUIDANCE),
     "app_not_granted",
   );
 }
@@ -626,9 +651,10 @@ async function runHitTestGate(
     // screenshot and click, or a background app's window overlaps the target.
     return errorResult(
       `Input at these coordinates would land on "${target.displayName}", ` +
-        `which is not in the allowed applications. Take a fresh screenshot ` +
-        `to see the current window layout.` +
-        ACCESS_GATE_GUIDANCE,
+        `which is not in the allowed applications.` +
+        (consoleHostNote(target.bundleId, target.displayName) ||
+          ` Take a fresh screenshot to see the current window layout.` +
+            ACCESS_GATE_GUIDANCE),
       "app_not_granted",
     );
   }
@@ -2926,26 +2952,65 @@ async function handleOpenApplication(
   const app = requireString(args, "app");
   if (app instanceof Error) return errorResult(app.message, "bad_args");
 
-  // Resolve display-name → bundle ID. Same logic as request_access.
+  // Resolve display-name → bundle ID, but ONLY against the allowlist itself.
+  // Avoids paying the listInstalledApps() cost on the hot path and is
+  // arguably more correct: if the user granted "Slack", the model asking
+  // to open "Slack" should match THAT grant.
+  //
+  // Exact match first, then a unique loose match. `request_access` resolves
+  // names loosely ("Notepad++" → "Notepad++ (64-bit x64)"), so a model that
+  // repeats the name it passed there would otherwise be told "not granted"
+  // about an app that IS granted — and the advice to call request_access
+  // again sends it in a loop. Ambiguity stays a hard no: "notepad" matching
+  // both Notepad and Notepad++ must not silently pick one.
+  const lower = app.toLowerCase();
   const allowed = new Set(overrides.allowedApps.map((g) => g.bundleId));
-  let targetBundleId: string | undefined;
-
-  if (looksLikeBundleId(app) && allowed.has(app)) {
-    targetBundleId = app;
-  } else {
-    // Try display name → bundle ID, but ONLY against the allowlist itself.
-    // Avoids paying the listInstalledApps() cost on the hot path and is
-    // arguably more correct: if the user granted "Slack", the model asking
-    // to open "Slack" should match THAT grant.
-    const match = overrides.allowedApps.find(
-      (g) => g.displayName.toLowerCase() === app.toLowerCase(),
-    );
-    targetBundleId = match?.bundleId;
-  }
+  const exact = overrides.allowedApps.find(
+    (g) => g.displayName.toLowerCase() === lower,
+  );
+  // Models routinely pass the executable name instead of the display name
+  // ("pwsh" for "PowerShell 7"), and `request_access` accepts that — so the
+  // loose pass compares against the bundleId stem too. Only one direction:
+  // "Notepad++" may resolve to "Notepad++ (64-bit x64)", but the reverse
+  // containment would also let it match a plain "Notepad" grant and turn a
+  // unique answer into a false ambiguity. Ambiguous input still falls through
+  // to the explicit-choice error below rather than guessing.
+  const stem = (bundleId: string) =>
+    (bundleId.split(/[\\/]/).pop() ?? "").replace(/\.exe$/, "");
+  const loose = exact
+    ? []
+    : overrides.allowedApps.filter(
+        (g) =>
+          g.displayName.toLowerCase().includes(lower) ||
+          stem(g.bundleId).toLowerCase() === lower,
+      );
+  const targetBundleId =
+    (looksLikeBundleId(app) && allowed.has(app) ? app : undefined) ??
+    exact?.bundleId ??
+    (loose.length === 1 ? loose[0].bundleId : undefined);
 
   if (!targetBundleId || !allowed.has(targetBundleId)) {
+    // Ambiguity is its own answer: "PowerShell" against both PowerShell 7 and
+    // Windows PowerShell must not silently pick one — the two differ in tier
+    // and in what the user thinks they approved.
+    if (loose.length > 1) {
+      return errorResult(
+        `"${app}" matches ${loose.length} granted applications ` +
+          `(${loose.map((g) => `"${g.displayName}"`).join(", ")}). Pass one of ` +
+          `those display names exactly, or the target app's bundleId.`,
+        "bad_args",
+      );
+    }
+    // A non-empty allowlist means the app is probably granted under a name the
+    // model didn't echo, so show the actual names rather than sending it back
+    // through request_access.
+    const granted = overrides.allowedApps.map((g) => `"${g.displayName}"`);
     return errorResult(
-      `"${app}" is not granted for this session. Call request_access first.`,
+      `"${app}" does not match any granted application in this session` +
+        (granted.length > 0
+          ? ` (granted: ${granted.join(", ")}). Pass one of those display names ` +
+            `exactly, or the granted app's bundleId.`
+          : `. Call request_access first.`),
       "app_not_granted",
     );
   }
