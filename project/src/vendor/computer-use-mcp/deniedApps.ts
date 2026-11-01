@@ -375,6 +375,12 @@ const TERMINAL_NAME_SUBSTRINGS: readonly string[] = [
   "git bash",
   "conemu",
   "cmder",
+  // The legacy console host. Without this, a granted `conhost.exe` resolves to
+  // display name "Console Window Host", matches none of the substrings above,
+  // and lands at tier "full" — full keyboard into a shell. Deliberately not the
+  // bare word "console": too generic for `.includes()`.
+  "conhost",
+  "console window host",
   // IDEs (VS Code family)
   "visual studio code",
   "visual studio", // catches VS for Mac + Windows

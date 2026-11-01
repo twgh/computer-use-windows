@@ -3019,7 +3019,31 @@ async function handleOpenApplication(
   // what tier "read" enables (you need it on screen to screenshot it). The
   // tier gates on click/type catch any follow-up interaction.
 
-  await adapter.executor.openApp(targetBundleId);
+  const grant = overrides.allowedApps.find((g) => g.bundleId === targetBundleId);
+  const name = grant?.displayName ?? app;
+  const outcome = await adapter.executor.openApp(targetBundleId);
+
+  // `"present"` is a refusal, not a success: the app has a window but Windows
+  // would not raise it. Claiming "Opened" here sent the model off clicking at
+  // coordinates owned by whatever really was in front — and retrying the call
+  // used to spawn a duplicate window, which is why the message says not to.
+  if (outcome === "present") {
+    return errorResult(
+      `"${name}" is already running but could not be brought to the front — ` +
+        `Windows refuses focus changes requested by a background process. Do ` +
+        `not call open_application again (it will not open a second window), ` +
+        `and do not act on where you expect it to be: take a screenshot and ` +
+        `work with what is actually in front, or ask the user to click it.`,
+      "state_conflict",
+    );
+  }
+
+  let summary =
+    outcome === "focused"
+      ? `Brought "${name}" to the front.`
+      : outcome === "launched"
+        ? `Opened "${name}".`
+        : `Asked the system to open "${name}" — this host cannot confirm it came forward.`;
 
   // On multi-monitor setups, Windows may place the opened window on a monitor
   // the resolver won't pick (e.g. the agent host + another allowed app are
@@ -3034,14 +3058,13 @@ async function handleOpenApplication(
       // hint skipped
     }
     if (displayCount >= 2) {
-      return okText(
-        `Opened "${app}". If it isn't visible in the next screenshot, it may ` +
-          `have opened on a different monitor — use switch_display to check.`,
-      );
+      summary +=
+        ` If it isn't visible in the next screenshot, it may be on a different ` +
+        `monitor — use switch_display to check.`;
     }
   }
 
-  return okText(`Opened "${app}".`);
+  return okText(summary);
 }
 
 async function handleSwitchDisplay(

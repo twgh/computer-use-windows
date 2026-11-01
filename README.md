@@ -1,4 +1,4 @@
-# Windows 电脑使用 Skill 0.5.2
+# Windows 电脑使用 Skill 0.5.3
 
 ## 项目定位
 
@@ -180,6 +180,15 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。
 
 ## 更新日志
+
+### 0.5.3：`open_application` 不再冒领成功，conhost 归入 terminal 档，版本号有了同步脚本
+
+- **`open_application` 按真实结果说话。** helper 侧 `focus_existing_window` 改为三态（`focused` / `present` / `absent`），`open_app` 据此返回 `focused` / `present` / `launched`，工具层映射成四种文本：真正提到前台说 `Brought "X" to the front.`，新起进程说 `Opened "X".`，**应用在运行但 Windows 拒绝让后台进程抢焦点时说 `present` 并报错**，host 无法区分时给一句明确的中性文本。旧实现两种情况都回 `Opened`：一是模型据此在"应该在的位置"点击而那里其实是别的窗口，二是重试就多开一个窗口。vendor 的 `openApp` 签名相应变成 `Promise<OpenAppOutcome | void>`（本 skill 只在 Windows 上使用，所以动了共享层；返回 `void` 的 host 得到中性文本而非冒领）。
+- **松匹配砍掉反向包含。** 0.5.2 引入显示名松匹配时写了双向 `includes`，结果 `Notepad++` 会同时命中一个普通的 `Notepad` 授权，把唯一答案变成假歧义 —— 是我自己加的"多命中拒绝猜测"保护把它暴露出来的。现在只保留「已授权显示名包含输入」与「输入等于可执行文件名」两个方向。
+- **`conhost.exe` 归入 terminal 分类。** 它的显示名「Console Window Host」不含 "terminal" 子串，此前落到默认分类拿到 **full 档 = 完整键盘进 shell**。补了 `conhost` 与 `console window host` 两个精确子串，没加裸词 "console"。
+- **`scripts/set_version.py`** —— `--show` / `--check` / `<版本>` 三种模式，一次同步 SKILL.md frontmatter、package.json、MCP serverInfo 字面量、README 标题四处。`--check` 在漂移时退出码 1，可以挂到发布前。版本号此前纯靠人工四处改，0.5.0 就漏过一处。
+
+实测：`focused` 与 `launched` 两条文本实机观察到（`Brought "Notepad++ (64-bit x64)" to the front.` / `Opened "Notepad".`）；`open_application("Notepad++")` 在 `Notepad` 同时已授权的会话下唯一命中，反向包含修复确认；`getDeniedCategoryForApp` 对 conhost 与 Windows Terminal 均返回 `terminal`、对 Notepad++ 返回 `null`；`set_version.py` 三模式跑通，四处一致。`present` 分支需要 Windows 真的拒绝一次焦点变更，未能稳定复现，仅经代码与文本核对。`npm run build` / `check` / `validate_skill.py` 通过。
 
 ### 0.5.2：注册表路径展开、抢焦点不再抛异常、`open_application` 的名字与控制台窗口
 

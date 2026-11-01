@@ -894,13 +894,17 @@ def _process_running(image_path: str) -> bool:
     return False
 
 
-def focus_existing_window(bundle_id: str) -> bool:
-    """Focus a window that already belongs to this app, if there is one.
+def focus_existing_window(bundle_id: str) -> str:
+    """Bring an existing window of this app forward.
+
+    Returns `"focused"`, `"present"` (a window exists but Windows refused the
+    focus change), or `"absent"` (nothing to raise — the caller may launch).
 
     `os.startfile` on an .exe launches unconditionally, so every
     `open_application` call added another window (three calls produced three
     Notepad windows during verification). The tool's contract is "bring to the
-    front, launching if necessary" — so look for an existing window first.
+    front, launching if necessary" — so look for an existing window first, and
+    never launch when one is already there even if raising it failed.
 
     Uses resolve_window_pid so Store apps are matched by their real host
     process rather than ApplicationFrameHost.
@@ -933,21 +937,19 @@ def focus_existing_window(bundle_id: str) -> bool:
         # imprecision: with several tabs, the visible one may not be the
         # granted app's.
         if not _process_running(wanted):
-            return False
+            return "absent"
         hwnd = _console_host_window()
         if hwnd is None:
-            return False
+            return "absent"
     else:
         hwnd = found[0]
     try:
         if win32gui.IsIconic(hwnd):
             win32gui.ShowWindow(hwnd, SW_RESTORE)
             time.sleep(0.05)
-        # Propagated, not swallowed: `open_application` on an already-running app
-        # promises "brought to the front", so it has to be able to say it failed.
-        return _force_foreground(hwnd)
+        return "focused" if _force_foreground(hwnd) else "present"
     except Exception:
-        return False
+        return "present"
 
 
 def window_apps() -> list[dict[str, Any]]:
@@ -978,15 +980,24 @@ def window_apps() -> list[dict[str, Any]]:
     return sorted(results.values(), key=lambda item: item["displayName"].lower())
 
 
-def open_app(bundle_id: str) -> None:
+def open_app(bundle_id: str) -> str:
+    """Return `"focused"`, `"present"`, or `"launched"`.
+
+    Surfaced all the way to the tool result so `open_application` cannot claim
+    "Opened" when Windows refused to raise the window — that lie sends the model
+    off clicking at coordinates belonging to whatever IS in front.
+    """
     target = bundle_id.strip()
     if not target:
         raise RuntimeError("Missing app identifier")
-    if focus_existing_window(target):
-        return
+    outcome = focus_existing_window(target)
+    if outcome != "absent":
+        # Including "present": the app already has a window, so launching would
+        # only add a duplicate. The caller reports the refusal instead.
+        return outcome
     if os.path.exists(target):
         os.startfile(target)
-        return
+        return "launched"
     # Both remaining paths must not inherit this process's stdio. The bridge
     # reads the helper with execFile, which resolves on 'close' — every stdio
     # stream at EOF — not on the helper's own exit. A launched app holding the
@@ -999,8 +1010,9 @@ def open_app(bundle_id: str) -> None:
     resolved = shutil.which(target)
     if resolved:
         subprocess.Popen([resolved], **detached)
-        return
+        return "launched"
     subprocess.Popen(["cmd", "/c", "start", "", target], shell=False, **detached)
+    return "launched"
 
 
 def read_clipboard() -> str:
@@ -1459,8 +1471,7 @@ def main() -> int:
             json_output({"ok": True, "result": window_apps()})
             return 0
         if command == "open_app":
-            open_app(str(payload["bundleId"]))
-            json_output({"ok": True, "result": True})
+            json_output({"ok": True, "result": open_app(str(payload["bundleId"]))})
             return 0
         if command == "read_clipboard":
             json_output({"ok": True, "result": read_clipboard()})

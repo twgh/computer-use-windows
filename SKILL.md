@@ -1,6 +1,6 @@
 ---
 name: computer-use-windows
-version: 0.5.2
+version: 0.5.3
 description: Windows 桌面 computer-use 能力：截图（多显示器 / 混合 DPI / 区域放大）、鼠标点击与拖拽、键盘输入与组合键、应用启动与前台切换、剪贴板读写、窗口与显示器映射。自带独立 MCP server 与 Python runtime，首次运行自动自举，不依赖私有原生模块或提取的应用资产，适配任意支持 MCP 的 agent 客户端。当任务需要在 Windows 上操作用户桌面（截屏、点击、输入文字、按快捷键、启动或切换应用、读取剪贴板、多屏操作）时，使用本 skill。
 agent_created: false
 tags:

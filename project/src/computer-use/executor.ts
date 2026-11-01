@@ -3,6 +3,7 @@ import type {
   DisplayGeometry,
   FrontmostApp,
   InstalledApp,
+  OpenAppOutcome,
   ResolvePrepareCaptureResult,
   RunningApp,
   ScreenshotResult,
@@ -244,8 +245,8 @@ export function createCliExecutor(opts: {
       return callPythonHelper('list_running_apps', {})
     },
 
-    async openApp(bundleId: string): Promise<void> {
-      await callPythonHelper('open_app', { bundleId })
+    async openApp(bundleId: string): Promise<OpenAppOutcome> {
+      return callPythonHelper<OpenAppOutcome>('open_app', { bundleId })
     },
   }
 }

@@ -1,3 +1,6 @@
+/** Outcome of `openApp` — see the executor method for the semantics. */
+export type OpenAppOutcome = "focused" | "present" | "launched"
+
 export interface DisplayGeometry {
   id?: number
   displayId?: number
@@ -98,7 +101,15 @@ export interface ComputerExecutor {
   listInstalledApps(): Promise<InstalledApp[]>
   getAppIcon?(path: string): Promise<string | undefined>
   listRunningApps(): Promise<RunningApp[]>
-  openApp(bundleId: string): Promise<void>
+  /**
+   * Bring the app to the front, launching it only if it has no window.
+   *
+   * `"focused"` — an existing window came forward. `"present"` — the app has a
+   * window but the OS refused to raise it (a background process cannot steal
+   * focus). `"launched"` — a new process started. `void` — the host cannot
+   * distinguish, and the tool layer must not claim more than "requested".
+   */
+  openApp(bundleId: string): Promise<OpenAppOutcome | void>
   readClipboard(): Promise<string>
   writeClipboard(text: string): Promise<void>
 }
