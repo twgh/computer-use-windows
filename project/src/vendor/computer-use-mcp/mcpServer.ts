@@ -293,7 +293,7 @@ export function createComputerUseMcpServer(
   const server = new Server(
     // Reported over MCP `initialize`. Keep in step with package.json — the
     // vendor layer can't read it (no node:fs by design), so nothing enforces it.
-    { name: serverName, version: "0.5.3" },
+    { name: serverName, version: "0.5.4" },
     {
       capabilities: { tools: {}, logging: {} },
       // Surfaced to the model at initialize time, before any call. Agents that

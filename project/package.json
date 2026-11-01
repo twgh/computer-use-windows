@@ -1,6 +1,6 @@
 {
   "name": "computer-use-windows",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Top-level Windows computer-use skill with a bundled standalone runtime and MCP server, usable from any MCP-capable agent client.",
   "type": "module",
   "bin": {
@@ -10,7 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "python ../scripts/run_tests.py",
+    "test:quick": "python ../scripts/run_tests.py --quick"
   },
   "keywords": [
     "skill",

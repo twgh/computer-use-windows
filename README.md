@@ -1,4 +1,4 @@
-# Windows 电脑使用 Skill 0.5.3
+# Windows 电脑使用 Skill 0.5.4
 
 ## 项目定位
 
@@ -72,12 +72,40 @@
 - UAC / 管理员窗口：提权窗口可正确识别、截图与窗口管理正常；非提权 runtime 注入的输入被 Windows UIPI 拦截，helper 会显式报错并提示以管理员运行 runtime
 - 混合 DPI 场景，多屏不同缩放验证通过
 
+## 测试与发布前检查
+
+一个入口跑完全部检查，任一步失败即退出码非零，可直接挂到发布前：
+
+```bash
+python scripts/run_tests.py            # 全部 7 个阶段，约 6 秒
+python scripts/run_tests.py --quick    # 跳过 stdio 集成测试（不碰桌面锁）
+python scripts/run_tests.py --list     # 列出阶段与实际命令
+cd project && npm test                 # 等价入口
+```
+
+| 阶段 | 覆盖 |
+| --- | --- |
+| build / typecheck | `tsc` 编译与类型检查 |
+| skill structure | `validate_skill.py` —— SKILL.md 结构与引用完整性 |
+| version sites | 四处版本号一致（`set_version.py --check`） |
+| helper unit tests | Python helper 纯逻辑：滚轮量换算、注册表路径展开、抢焦点不抛异常、窗口聚焦三态 |
+| TS layer unit tests | `resolveGrantedApp` 的逐级解析、terminal / browser 分类 |
+| MCP stdio integration | 真实起 server 走 `initialize`、`tools/list` 与门控错误文本 |
+
+写测试的三条规矩：
+
+- **不注入输入、不动用户窗口**。需要鼠标的断言一律打桩 —— `scroll` 的测试替换 `win32api.mouse_event` 只捕获参数、把 `move_pointer` 置空，所以随时能在正在干活的机器上跑。
+- stdio 阶段会短暂获取桌面会话锁；若被其他 agent 会话占用，相关测试**跳过而不是失败**。
+- 测试只放 `scripts/tests/`，任何临时产物写 `%TEMP%`（skill 目录内禁止落盘）。
+
+每条断言都对应一个真实发生过的 bug —— 滚轮的 120 倍、未展开的 `%systemroot%`、`isdigit()` 处理不了负数图标索引、含空格路径被截成 `C:\Program`、松匹配的反向包含。加修复时顺手想清楚"哪条断言本来能拦住它"。
+
 ## 打包分发
 
 ```bash
-python scripts/validate_skill.py .   # 先校验 skill 结构
+python scripts/run_tests.py            # 先跑完整检查
 cd scripts
-python package_skill.py              # 生成 computer-use-windows.zip
+python package_skill.py                # 生成 computer-use-windows.zip
 ```
 
 打包的是纯净的 skill 目录结构，不含构建产物和无关文件
@@ -181,6 +209,20 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。
 
 ## 更新日志
+
+### 0.5.4：加了测试流水线，它当场抓出三个真 bug
+
+之前这个仓库只有 `tsc --noEmit`，0.5.1–0.5.3 的所有验证都是实机手工跑的，一次性、不可重放。现在有了 `scripts/run_tests.py`：7 个阶段、40 条断言、约 6 秒，失败退出码非零，`npm test` 等价。三层 —— Python helper 纯逻辑（打桩捕获 `mouse_event` 参数，绝不动光标）、TS 层纯逻辑、以及真实起 server 走一遍 `initialize` / `tools/list` / 门控错误文本的 stdio 集成测试（被别的会话占着桌面锁时跳过而非失败）。
+
+写测试的过程中当场抓到三个 bug，全部已修：
+
+- **`_strip_icon_index` 处理不了负数图标索引。** 它用 `str.isdigit()` 判断逗号后的尾巴，而 `"-101".isdigit()` 是 False —— `app.exe,-101` 是 DisplayIcon 指向非首个图标的常规写法，后缀被留在路径上，产出又一个"看着像 bundleId、其实匹配不上任何进程"的条目，和 `%systemroot%` 是同一类故障。
+- **含空格的未加引号路径被 `split()` 截断。** `C:\Program Files\My App, Inc\app.exe` 取第一个空格分词得到 `C:\Program` —— 比原样返回更糟，因为它看起来完全像个合法路径。改为按 `.exe` 结尾切：可执行文件路径以 `.exe` 结束而参数不会，顺带也正确处理了 `app.exe /silent`。
+- **错误文本里"或者传 bundleId"是句假话。** `resolveGrantedApp` 的 bundleId 直通被 `looksLikeBundleId` 挡着 —— 那是个 macOS 反域名形状的正则（不含 `:` 和 `\`），Windows 的路径型 bundleId 一律过不了。现在先做无条件等值比对，那句建议才真的可用。
+
+顺带把 `open_application` 的名字解析从 handler 里抽成导出的纯函数 `resolveGrantedApp`，否则它没法被测试 —— 而"多命中拒绝猜测"这条安全属性恰恰最需要断言兜住。
+
+实测：`python scripts/run_tests.py` 7 阶段全绿；故意把 `WHEEL_DELTA` 改成 1 后流水线立刻 5 条断言失败并停在第 5 阶段，失败退出码 1、通过退出码 0 均已核对。
 
 ### 0.5.3：`open_application` 不再冒领成功，conhost 归入 terminal 档，版本号有了同步脚本
 

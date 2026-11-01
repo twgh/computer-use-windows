@@ -736,9 +736,17 @@ def read_reg_value(root, subkey: str, value_name: str) -> str | None:
 
 def _strip_icon_index(path: str) -> str:
     """DisplayIcon-style values may carry a trailing icon index, e.g.
-    "C:\\app\\icon.exe,0". Strip the ",<digits>" suffix when present."""
+    "C:\\app\\icon.exe,0" or "C:\\app\\icon.exe,-101" — negative indices are the
+    usual way to point at a non-first icon in the exe. `str.isdigit()` answers
+    False for "-101", which left the suffix glued on and produced a bundleId
+    that is not a path at all (same failure family as the unexpanded
+    `%systemroot%` values: the entry shows up, but nothing can ever match it).
+    """
     idx = path.rfind(",")
-    if idx != -1 and path[idx + 1:].isdigit():
+    if idx == -1:
+        return path
+    tail = path[idx + 1 :].strip()
+    if tail.lstrip("+-").isdigit():
         return path[:idx]
     return path
 
@@ -769,8 +777,17 @@ def extract_exe_from_command(command: str | None) -> str | None:
         end = command.find('"', 1)
         if end > 1:
             return expand_registry_path(_strip_icon_index(command[1:end]))
+    # Unquoted. Splitting on whitespace looked reasonable until it turned
+    # `C:\Program Files\My App, Inc\app.exe` into `C:\Program` — a value that
+    # still looks like a bundleId but matches no process. An executable path
+    # ends in `.exe` and its arguments do not, so cut at the extension and keep
+    # everything before it.
+    expanded = expand_registry_path(command)
+    cut = expanded.lower().find(".exe")
+    if cut != -1:
+        return _strip_icon_index(expanded[: cut + 4])
     parts = command.split()
-    return expand_registry_path(_strip_icon_index(parts[0])) if parts else None
+    return expand_registry_path(parts[0]) if parts else None
 
 
 def collect_registry_apps(root, subkey: str, out: dict[str, dict[str, Any]]) -> None:

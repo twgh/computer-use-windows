@@ -2944,6 +2944,57 @@ async function handleMoveMouse(
   return okText("Moved.");
 }
 
+/** Outcome of resolving an `open_application` argument against the allowlist. */
+export type GrantedAppResolution =
+  | { kind: "ok"; grant: AppGrant }
+  | { kind: "ambiguous"; grants: AppGrant[] }
+  | { kind: "none" }
+
+/**
+ * Resolve an `open_application` argument, against the session allowlist ONLY —
+ * never the installed-app table, so the hot path does not pay for
+ * `listInstalledApps()` and "the user granted Slack" means "the model may open
+ * Slack".
+ *
+ * Order: bundleId passthrough → exact display name → a *unique* loose match.
+ * The loose pass exists because `request_access` resolves names loosely
+ * ("Notepad++" → "Notepad++ (64-bit x64)"); without it a model repeating the
+ * name it passed there gets "not granted" about an app that IS granted, plus
+ * advice to re-run request_access — a loop. It matches the display name
+ * containing the input, or the input equal to the executable-name stem
+ * ("pwsh" → "PowerShell 7"). Deliberately one-directional: reverse containment
+ * also matches a plain "Notepad" grant and turns a unique answer into a false
+ * ambiguity. Ambiguity is never guessed at — the two entries can differ in tier
+ * and in what the user believes they approved.
+ */
+export function resolveGrantedApp(
+  app: string,
+  allowedApps: readonly AppGrant[],
+): GrantedAppResolution {
+  const lower = app.toLowerCase();
+  const stemOf = (bundleId: string) =>
+    (bundleId.split(/[\\/]/).pop() ?? "").replace(/\.exe$/, "");
+
+  // Exact bundleId first, without the `looksLikeBundleId` gate: on Windows a
+  // bundleId is a path (`c:\apps\…\notepad++.exe`), which that macOS-shaped
+  // reverse-DNS regex rejects. It would make the "or pass the bundleId" advice
+  // in the errors below untrue.
+  const direct = allowedApps.find((g) => g.bundleId === app);
+  if (direct) return { kind: "ok", grant: direct };
+
+  const exact = allowedApps.find((g) => g.displayName.toLowerCase() === lower);
+  if (exact) return { kind: "ok", grant: exact };
+
+  const loose = allowedApps.filter(
+    (g) =>
+      g.displayName.toLowerCase().includes(lower) ||
+      stemOf(g.bundleId).toLowerCase() === lower,
+  );
+  if (loose.length === 1) return { kind: "ok", grant: loose[0] };
+  if (loose.length > 1) return { kind: "ambiguous", grants: loose };
+  return { kind: "none" };
+}
+
 async function handleOpenApplication(
   adapter: ComputerUseHostAdapter,
   args: Record<string, unknown>,
@@ -2952,55 +3003,19 @@ async function handleOpenApplication(
   const app = requireString(args, "app");
   if (app instanceof Error) return errorResult(app.message, "bad_args");
 
-  // Resolve display-name → bundle ID, but ONLY against the allowlist itself.
-  // Avoids paying the listInstalledApps() cost on the hot path and is
-  // arguably more correct: if the user granted "Slack", the model asking
-  // to open "Slack" should match THAT grant.
-  //
-  // Exact match first, then a unique loose match. `request_access` resolves
-  // names loosely ("Notepad++" → "Notepad++ (64-bit x64)"), so a model that
-  // repeats the name it passed there would otherwise be told "not granted"
-  // about an app that IS granted — and the advice to call request_access
-  // again sends it in a loop. Ambiguity stays a hard no: "notepad" matching
-  // both Notepad and Notepad++ must not silently pick one.
-  const lower = app.toLowerCase();
-  const allowed = new Set(overrides.allowedApps.map((g) => g.bundleId));
-  const exact = overrides.allowedApps.find(
-    (g) => g.displayName.toLowerCase() === lower,
-  );
-  // Models routinely pass the executable name instead of the display name
-  // ("pwsh" for "PowerShell 7"), and `request_access` accepts that — so the
-  // loose pass compares against the bundleId stem too. Only one direction:
-  // "Notepad++" may resolve to "Notepad++ (64-bit x64)", but the reverse
-  // containment would also let it match a plain "Notepad" grant and turn a
-  // unique answer into a false ambiguity. Ambiguous input still falls through
-  // to the explicit-choice error below rather than guessing.
-  const stem = (bundleId: string) =>
-    (bundleId.split(/[\\/]/).pop() ?? "").replace(/\.exe$/, "");
-  const loose = exact
-    ? []
-    : overrides.allowedApps.filter(
-        (g) =>
-          g.displayName.toLowerCase().includes(lower) ||
-          stem(g.bundleId).toLowerCase() === lower,
-      );
-  const targetBundleId =
-    (looksLikeBundleId(app) && allowed.has(app) ? app : undefined) ??
-    exact?.bundleId ??
-    (loose.length === 1 ? loose[0].bundleId : undefined);
+  const resolution = resolveGrantedApp(app, overrides.allowedApps);
 
-  if (!targetBundleId || !allowed.has(targetBundleId)) {
-    // Ambiguity is its own answer: "PowerShell" against both PowerShell 7 and
-    // Windows PowerShell must not silently pick one — the two differ in tier
-    // and in what the user thinks they approved.
-    if (loose.length > 1) {
-      return errorResult(
-        `"${app}" matches ${loose.length} granted applications ` +
-          `(${loose.map((g) => `"${g.displayName}"`).join(", ")}). Pass one of ` +
-          `those display names exactly, or the target app's bundleId.`,
-        "bad_args",
-      );
-    }
+  if (resolution.kind === "ambiguous") {
+    const names = resolution.grants.map((g) => `"${g.displayName}"`).join(", ");
+    return errorResult(
+      `"${app}" matches ${resolution.grants.length} granted applications ` +
+        `(${names}). Pass one of those display names exactly, or the target ` +
+        `app's bundleId.`,
+      "bad_args",
+    );
+  }
+
+  if (resolution.kind === "none") {
     // A non-empty allowlist means the app is probably granted under a name the
     // model didn't echo, so show the actual names rather than sending it back
     // through request_access.
@@ -3015,12 +3030,13 @@ async function handleOpenApplication(
     );
   }
 
+  const targetBundleId = resolution.grant.bundleId;
+
   // open_application works at any tier — bringing an app forward is exactly
   // what tier "read" enables (you need it on screen to screenshot it). The
   // tier gates on click/type catch any follow-up interaction.
 
-  const grant = overrides.allowedApps.find((g) => g.bundleId === targetBundleId);
-  const name = grant?.displayName ?? app;
+  const name = resolution.grant.displayName;
   const outcome = await adapter.executor.openApp(targetBundleId);
 
   // `"present"` is a refusal, not a success: the app has a window but Windows
