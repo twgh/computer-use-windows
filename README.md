@@ -1,29 +1,21 @@
 # Windows 电脑使用 Skill 0.5.4
 
-## 项目定位
+## 这个项目是什么
 
-这个项目完全本地化，同时是：
+一个 Windows 桌面控制的 skill，同时是自带 MCP server 的独立 runtime：截图、鼠标、键盘、应用启动、窗口与显示器映射、剪贴板，共 25 个工具（逐个见「暴露的 MCP 工具」）。给 agent 的入口是 `SKILL.md`。
 
-- 一个顶级 `skill`（入口见 `SKILL.md`）
-- 一套独立的 Windows 桌面控制 runtime
-- 一个给 agent 生态使用的 computer-use MCP server
+跟同类实现的差别在两处：
 
-它是 skill-first，客户端无关，可对接任意支持 MCP 的 agent 产品。
+- **skill-first、客户端无关** —— 走 MCP over stdio，任何支持 MCP 的 agent 产品都能接，不绑定某个客户端的本机资产：没有私有 `.node` 二进制，不需要提取内部隐藏资源，只用公开依赖（`Node.js + Python + pyautogui + mss + Pillow + psutil + pywin32`）。
+- **自带可自举的 runtime** —— 首次调用工具时自动创建 venv 并装依赖；vendored 的 TypeScript 工具层（门控、坐标换算、批量执行）已接到 Windows 原生的 Python backend。
 
-### 这个项目解决什么问题
+装上 skill、`cd project && npm run build`，就能用。
 
-- 不依赖任何特定 agent 客户端的本机应用
-- 不依赖私有 `.node` 二进制
-- 不依赖提取内部隐藏资产
-- skill 装上、server 构建好，就能直接用
+## 来源与许可
 
-### 你现在拿到的能力
+本项目由 [wimi321/windows-computer-use-skill](https://github.com/wimi321/windows-computer-use-skill)（MIT License，`Copyright (c) 2026 haoc`）重构而来，沿用它"skill + 独立 runtime + MCP server"的整体设计。MIT 要求保留上游版权声明，已一并写进 `LICENSE`；本项目同样以 MIT 发布。
 
-- 顶级 Windows computer-use skill
-- 独立 MCP server：截图、鼠标、键盘、应用启动、窗口/显示器映射、剪贴板
-- 只使用公开依赖：`Node.js + Python + pyautogui + mss + Pillow + psutil + pywin32`
-- 首次运行自动自举：自动创建虚拟环境并安装 Python 依赖
-- 提取出来的 TypeScript 工具层已经接到 Windows 原生 Python backend
+重构集中在 Windows 侧：把 macOS 优先的工具层接到 Win32 原生 backend，加上混合 DPI 与多显示器、注册表安装项 ∪ 可见窗口合成的应用候选清单、分层授权与落点门控、会话锁，以及测试流水线。
 
 ## MCP 配置
 
@@ -275,39 +267,25 @@ v0.4.x 的锁一旦获取就持有到 server 进程退出：两个 IDE 同时开
 
 实测：锁语义 11 项断言（获取 / 自见 / 阻塞 / 空闲接管 / 被抢后原持有者阻塞 / 释放 / 幂等 / 旧锁不接管）+ MCP stdio 全链路 11 项（25 工具注册、截图持锁、release 删文件、幂等、再获取）全部通过。
 
-### 0.2.0：补齐 save_to_disk 与鼠标缓动，清理死代码
+### 0.4.2：权限检查不再每次工具调用都问一遍
 
-- `COMPUTER_USE_HIDE_BEFORE_ACTION` 更名为 `COMPUTER_USE_FOCUS_BEFORE_ACTION`（Windows 侧从不隐藏窗口）。
-- 实现 `COMPUTER_USE_MOUSE_ANIMATION` 指针缓动：按距离计算 pyautogui 时长（2000 px/秒，上限 0.5 秒），每次动作前重新读取门控，中途改动即时生效。
-- `save_to_disk: true` 现在真的写盘：输出到 `%TEMP%\computer-use-windows\` 并在结果里返回绝对路径。
-- `list_granted_applications` 的返回值新增 `coordinateMode`，与工具描述一致。
-- 删除了 `inputLoader.ts` / `swiftLoader.ts` / `escHotkey.ts` / `drainRunLoop.ts` 四个遗留占位模块（调用即抛错，本 runtime 从未使用）。
+vendored 框架的 Gate 2 会在**每次工具调用**前查询 OS 权限。macOS 上这是真的 TCC 检查；Windows 上没有 TCC 可问，helper 返回常量 `{accessibility: true, screenRecording: true}` —— 但这一次"询问"是一个完整的 Python 进程：
 
-### 0.2.1：实机验证中修掉的缺陷
+```
+check_permissions 实测 5 次: 246 / 221 / 220 / 238 / 221 ms   → 均值 229ms
+一次 wait 工具调用: 294ms  ← 几乎全部花在这个检查上
+```
 
-以下五项都是在一台 3 屏 2560x1600 @150% 的真机上跑 MCP 全链路时暴露并修复的：
+于是把它**记忆化为每进程一次**，每次工具调用省下约 230ms（约 20% 延迟；`left_click` 实测 1475ms → 1240ms）。失败不缓存，瞬时进程错误不会把会话永久钉在"权限缺失"状态。
 
-| 缺陷 | 现象 | 修复 |
-| --- | --- | --- |
-| helper 输出编码 | 显示器标签的 `·`、中文应用名、剪贴板内容变成 U+FFFD（Python 按 cp936 写管道） | 调用侧 `PYTHONIOENCODING=utf-8` + helper 自行 `reconfigure` |
-| 剪贴板崩溃 | `read_clipboard` 报 access violation（x64 HANDLE 被截断成 32 位） | 为剪贴板 / 句柄 API 声明 `argtypes` / `restype` |
-| Store 应用无法驱动 | 计算器能授权却打不开、点不到（窗口归 `ApplicationFrameHost.exe`） | 新增 `resolve_window_pid`，穿透 `ApplicationFrameWindow` 找到宿主进程 |
-| 自动定位显示器空转 | 已授权应用在第 2/3 屏，首张截图却总在主屏 | helper 的 `resolve_prepare_capture` 支持 `autoResolve` + `allowlistBundleIds` |
-| `type` 极慢 | 27 字符耗时 7.1 秒（每个字素启动一次 Python 进程） | 连续普通字符合并为一次调用，同字符串降到 1.1 秒 |
-| `open_application` 重复开窗 | 契约是「带到前台」，实际每次调用都新开一个窗口（验证期间攒出 3 个记事本窗口） | 先按宿主进程匹配已有窗口并聚焦，找不到才启动 |
+同时清理了这个不可达分支上的谎话：报错原文是 `"Windows Accessibility and Screen Recording are now both granted."` —— macOS 词汇前直接拼了平台名，而 Windows 上既没有这两个权限，也没有那个面板。现在改为平台中立措辞（`input control` / `screen capture`），并在 Gate 2、`tcc_not_granted`、`tccState` 三处标注"Windows 上不可达"。
 
-### 0.3.0：补齐应用枚举
+分支**没有删除**，因为它是"平台前置条件"的正确接缝 —— Windows 上真实存在的是另一组问题：**会话 0 / 无交互桌面、RDP 断开、UAC 安全桌面**。代码里写明了：若把这些接进来，必须同时移除记忆化（那些状态会在运行期间变化）。
+### 0.4.1：缓动默认关闭、补文档
 
-`request_access` 的候选清单此前只来自注册表，导致模型看不到 Store 应用（计算器就在屏上却拿不到名字），同时混入大量内部代号（`olk`、`msoasb`、`IEDIAGCMD`）。两项改动：
-
-- **显示名改取可执行文件的版本资源**（仅 `App Paths` 分支）：`olk` → `Microsoft Outlook`、`chrome` → `Google Chrome`、`EXCEL` → `Microsoft Excel`。Uninstall 分支不动 —— 它的 `DisplayName` 已是本地化的用户可见名称（`剪映专业版`、`阿里云盘`），用版本资源覆盖反而更差（→ `JianyingPro`、`aDrive`）。
-- **并入「当前有可见窗口的进程」**（新增 helper 命令 `list_window_apps`）：可见窗口是「这是用户能指认的应用」的最强信号，Store 应用由此进入清单。窗口来源的条目跳过安装路径白名单，否则 `D:\apps\`、`C:\apps\` 下的便携应用会被丢掉。
-
-实测：清单中出现 `Calculator`；抽样的 `Calculator`、`Notepad`、`Google Chrome`、`MuMu模拟器` 四个名称全部授权成功（中文名亦正常）。
-
-### 0.3.1：不再放大截图
-
-截图目标尺寸此前会乘显示器缩放系数 —— 又是 macOS 移植残留（那边 `DisplayGeometry` 是逻辑点，需要乘才能得到物理像素）。本后端上报的已是物理像素，乘上去只会把图放大：1280x800 的屏会被插值成 1389x868，像素更多、载荷更大、细节为零。分辨率足够大的屏受 token 预算限制，乘与不乘结果相同，因此这个偏差一直没暴露。`zoom` 的放大属刻意行为，保留（改用独立的 `zoomTargetDims`）。
+- **`COMPUTER_USE_MOUSE_ANIMATION` 改为默认关闭**（显式 `=1` 才开启）。缓动对普通点击没有价值，只对少数需要"真实指针轨迹"的软件有用（悬停才展开的菜单、监听移动的拖放目标），代价是每次点击最多多等约 0.5 秒。
+- 文档新增**落点校验（hit-test）**一节：所有鼠标落点类工具在注入输入前会检查目标坐标下的应用，不在白名单或档位不足都会拒绝执行。
+- 修掉架构图在 Typora 里的 `Lexical error`：mermaid 10.1.0 的词法分析器不接受**未加引号的 `·`**，节点标签一律加引号即可（`/`、`-`、`+`、中文各自都没问题，是 `·` 触发的）。
 
 ### 0.4.0：图像预算可配置
 
@@ -328,23 +306,37 @@ v0.4.x 的锁一旦获取就持有到 server 进程退出：两个 IDE 同时开
 
 想"看清细节"请优先用 `zoom`：它把区域裁出来再放大，预算作用在那一小块上，同一屏幕面积的有效像素远高于整屏截图。
 
-### 0.4.1：缓动默认关闭、补文档
+### 0.3.1：不再放大截图
 
-- **`COMPUTER_USE_MOUSE_ANIMATION` 改为默认关闭**（显式 `=1` 才开启）。缓动对普通点击没有价值，只对少数需要"真实指针轨迹"的软件有用（悬停才展开的菜单、监听移动的拖放目标），代价是每次点击最多多等约 0.5 秒。
-- 文档新增**落点校验（hit-test）**一节：所有鼠标落点类工具在注入输入前会检查目标坐标下的应用，不在白名单或档位不足都会拒绝执行。
-- 修掉架构图在 Typora 里的 `Lexical error`：mermaid 10.1.0 的词法分析器不接受**未加引号的 `·`**，节点标签一律加引号即可（`/`、`-`、`+`、中文各自都没问题，是 `·` 触发的）。
+截图目标尺寸此前会乘显示器缩放系数 —— 又是 macOS 移植残留（那边 `DisplayGeometry` 是逻辑点，需要乘才能得到物理像素）。本后端上报的已是物理像素，乘上去只会把图放大：1280x800 的屏会被插值成 1389x868，像素更多、载荷更大、细节为零。分辨率足够大的屏受 token 预算限制，乘与不乘结果相同，因此这个偏差一直没暴露。`zoom` 的放大属刻意行为，保留（改用独立的 `zoomTargetDims`）。
 
-### 0.4.2：权限检查不再每次工具调用都问一遍
+### 0.3.0：补齐应用枚举
 
-vendored 框架的 Gate 2 会在**每次工具调用**前查询 OS 权限。macOS 上这是真的 TCC 检查；Windows 上没有 TCC 可问，helper 返回常量 `{accessibility: true, screenRecording: true}` —— 但这一次"询问"是一个完整的 Python 进程：
+`request_access` 的候选清单此前只来自注册表，导致模型看不到 Store 应用（计算器就在屏上却拿不到名字），同时混入大量内部代号（`olk`、`msoasb`、`IEDIAGCMD`）。两项改动：
 
-```
-check_permissions 实测 5 次: 246 / 221 / 220 / 238 / 221 ms   → 均值 229ms
-一次 wait 工具调用: 294ms  ← 几乎全部花在这个检查上
-```
+- **显示名改取可执行文件的版本资源**（仅 `App Paths` 分支）：`olk` → `Microsoft Outlook`、`chrome` → `Google Chrome`、`EXCEL` → `Microsoft Excel`。Uninstall 分支不动 —— 它的 `DisplayName` 已是本地化的用户可见名称（`剪映专业版`、`阿里云盘`），用版本资源覆盖反而更差（→ `JianyingPro`、`aDrive`）。
+- **并入「当前有可见窗口的进程」**（新增 helper 命令 `list_window_apps`）：可见窗口是「这是用户能指认的应用」的最强信号，Store 应用由此进入清单。窗口来源的条目跳过安装路径白名单，否则 `D:\apps\`、`C:\apps\` 下的便携应用会被丢掉。
 
-于是把它**记忆化为每进程一次**，每次工具调用省下约 230ms（约 20% 延迟；`left_click` 实测 1475ms → 1240ms）。失败不缓存，瞬时进程错误不会把会话永久钉在"权限缺失"状态。
+实测：清单中出现 `Calculator`；抽样的 `Calculator`、`Notepad`、`Google Chrome`、`MuMu模拟器` 四个名称全部授权成功（中文名亦正常）。
 
-同时清理了这个不可达分支上的谎话：报错原文是 `"Windows Accessibility and Screen Recording are now both granted."` —— macOS 词汇前直接拼了平台名，而 Windows 上既没有这两个权限，也没有那个面板。现在改为平台中立措辞（`input control` / `screen capture`），并在 Gate 2、`tcc_not_granted`、`tccState` 三处标注"Windows 上不可达"。
+### 0.2.1：实机验证中修掉的缺陷
 
-分支**没有删除**，因为它是"平台前置条件"的正确接缝 —— Windows 上真实存在的是另一组问题：**会话 0 / 无交互桌面、RDP 断开、UAC 安全桌面**。代码里写明了：若把这些接进来，必须同时移除记忆化（那些状态会在运行期间变化）。
+以下五项都是在一台 3 屏 2560x1600 @150% 的真机上跑 MCP 全链路时暴露并修复的：
+
+| 缺陷 | 现象 | 修复 |
+| --- | --- | --- |
+| helper 输出编码 | 显示器标签的 `·`、中文应用名、剪贴板内容变成 U+FFFD（Python 按 cp936 写管道） | 调用侧 `PYTHONIOENCODING=utf-8` + helper 自行 `reconfigure` |
+| 剪贴板崩溃 | `read_clipboard` 报 access violation（x64 HANDLE 被截断成 32 位） | 为剪贴板 / 句柄 API 声明 `argtypes` / `restype` |
+| Store 应用无法驱动 | 计算器能授权却打不开、点不到（窗口归 `ApplicationFrameHost.exe`） | 新增 `resolve_window_pid`，穿透 `ApplicationFrameWindow` 找到宿主进程 |
+| 自动定位显示器空转 | 已授权应用在第 2/3 屏，首张截图却总在主屏 | helper 的 `resolve_prepare_capture` 支持 `autoResolve` + `allowlistBundleIds` |
+| `type` 极慢 | 27 字符耗时 7.1 秒（每个字素启动一次 Python 进程） | 连续普通字符合并为一次调用，同字符串降到 1.1 秒 |
+| `open_application` 重复开窗 | 契约是「带到前台」，实际每次调用都新开一个窗口（验证期间攒出 3 个记事本窗口） | 先按宿主进程匹配已有窗口并聚焦，找不到才启动 |
+
+### 0.2.0：补齐 save_to_disk 与鼠标缓动，清理死代码
+
+- `COMPUTER_USE_HIDE_BEFORE_ACTION` 更名为 `COMPUTER_USE_FOCUS_BEFORE_ACTION`（Windows 侧从不隐藏窗口）。
+- 实现 `COMPUTER_USE_MOUSE_ANIMATION` 指针缓动：按距离计算 pyautogui 时长（2000 px/秒，上限 0.5 秒），每次动作前重新读取门控，中途改动即时生效。
+- `save_to_disk: true` 现在真的写盘：输出到 `%TEMP%\computer-use-windows\` 并在结果里返回绝对路径。
+- `list_granted_applications` 的返回值新增 `coordinateMode`，与工具描述一致。
+- 删除了 `inputLoader.ts` / `swiftLoader.ts` / `escHotkey.ts` / `drainRunLoop.ts` 四个遗留占位模块（调用即抛错，本 runtime 从未使用）。
+
