@@ -75,7 +75,7 @@ python scripts/run_tests.py --list     # 列出阶段与实际命令
 cd project && npm test                 # 等价入口
 ```
 
-CI 跑的就是同一个入口：`.github/workflows/test.yml`，`windows-latest` 单 job，push 到 `master` / PR / 手动触发。它显式建 `project/.runtime/venv`（本地是 server 首次调用时自举，而单测直接 import helper，没有任何东西会触发那个自举），并按 `requirements.txt` 哈希缓存。无桌面 runner 上监视器可能为空，stdio 阶段的相关断言只查错误形状不查具体标签。
+CI 跑的就是同一个入口：`.github/workflows/test.yml`，`windows-latest` 单 job，push 到 `master` / PR / 手动触发。它显式建 `project/.runtime/venv`（本地是 server 首次调用时自举，而单测直接 import helper，没有任何东西会触发那个自举），并且刻意不缓存 —— 恢复出来的 venv 若指向另一台 runner 的绝对路径，失败起来看着像代码回归。无桌面 runner 上监视器可能为空，stdio 阶段的断言只查不变式（未知显示器名不会静默成功、歧义名不会静默挑一个），环境相关的细节断言在装不齐样本机器上自动跳过，纯逻辑由单测覆盖。
 
 | 阶段 | 覆盖 |
 | --- | --- |

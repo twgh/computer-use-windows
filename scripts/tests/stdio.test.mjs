@@ -162,13 +162,17 @@ test("screenshot on an empty allowlist fails with self-guiding text", async (t) 
   assert.match(text, /rebuilt|moved/);
 });
 
-test("an unknown monitor is rejected with the available names listed", async (t) => {
+test("an unknown monitor is rejected rather than silently accepted", async (t) => {
   const response = await callTool("switch_display", { display: "Display 999 · nope" });
   if (skipIfLocked(response, t)) return;
-  assert.ok(isError(response));
-  // Only the shape is asserted, not the labels: a CI runner's monitor set (or
-  // complete lack of one) is environment state, not a property of this code.
-  assert.match(textOf(response), /Available monitors|No monitor/i);
+  // The invariant is "an unknown name never succeeds". Which error shape it
+  // takes depends on the machine: a runner with no display at all fails
+  // enumeration instead of listing candidates, and both are correct.
+  assert.ok(isError(response), textOf(response));
+  const text = textOf(response);
+  if (/Available monitors/.test(text)) {
+    assert.match(text, /No monitor named "Display 999 · nope"/);
+  }
 });
 
 test("open_application refuses a name matching two grants instead of guessing", async (t) => {
@@ -177,6 +181,15 @@ test("open_application refuses a name matching two grants instead of guessing", 
     reason: "test: ambiguous name resolution",
   });
   if (skipIfLocked(granted, t)) return;
+  // Both entries have to exist on this machine for the input to be ambiguous.
+  // Where only one is installed the call would resolve uniquely and actually
+  // launch something, so the case is skipped — the logic itself is covered by
+  // the pure `resolveGrantedApp` unit test, which needs no installed apps.
+  const payload = JSON.parse(textOf(granted));
+  if ((payload.granted ?? []).length !== 2) {
+    t.skip(`only ${(payload.granted ?? []).length} of the two names is installed here`);
+    return;
+  }
   const response = await callTool("open_application", { app: "PowerShell" });
   assert.ok(isError(response), "ambiguous input must not silently pick a grant");
   assert.match(textOf(response), /matches 2 granted applications/);

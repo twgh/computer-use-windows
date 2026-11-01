@@ -32,12 +32,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cache the Python venv
-        uses: actions/cache@v4
-        with:
-          path: project/.runtime/venv
-          key: venv-${{ runner.os }}-py3.12-${{ hashFiles('project/runtime/requirements.txt') }}
-
       - name: Install Node dependencies
         working-directory: project
         run: npm ci
@@ -46,12 +40,13 @@ jobs:
         # Locally the server self-bootstraps this on the first tool call, but the
         # unit tests import windows_helper.py directly — nothing would trigger
         # it, and the runner would fall back to an interpreter without pywin32.
+        # Deliberately not cached: a restored venv whose interpreter points at
+        # another runner's absolute path fails in a way that looks like a code
+        # regression, and building it costs well under a minute.
         run: |
-          if (-not (Test-Path project/.runtime/venv/Scripts/python.exe)) {
-            python -m venv project/.runtime/venv
-            project/.runtime/venv/Scripts/python.exe -m pip install --upgrade pip
-            project/.runtime/venv/Scripts/python.exe -m pip install -r project/runtime/requirements.txt
-          }
+          python -m venv project/.runtime/venv
+          project/.runtime/venv/Scripts/python.exe -m pip install --upgrade pip
+          project/.runtime/venv/Scripts/python.exe -m pip install -r project/runtime/requirements.txt
 
       - name: Run the test pipeline
         # build + typecheck + skill structure + version-site consistency +
