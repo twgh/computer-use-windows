@@ -29,6 +29,7 @@ import type { CuCallToolResult } from "./toolCalls.js";
 import {
   defersLockAcquire,
   handleToolCall,
+  LOCK_HELD_GUIDANCE,
   resetMouseButtonHeld,
 } from "./toolCalls.js";
 import { buildComputerUseTools } from "./tools.js";
@@ -43,9 +44,31 @@ import type {
 } from "./types.js";
 import { DEFAULT_GRANT_FLAGS } from "./types.js";
 
+/**
+ * The "who holds it" half. Hosts override it via
+ * `ComputerUseSessionContext.formatLockHeldMessage` to name the holder and
+ * their own idle-takeover policy; `LOCK_HELD_GUIDANCE` (from toolCalls.ts) is
+ * appended either way so the "what can I do" half is never re-implemented, and
+ * never contradicted by a host that disabled takeover.
+ */
 const DEFAULT_LOCK_HELD_MESSAGE =
-  "Another agent session is currently using the computer. Wait for that " +
-  "session to finish, or find a non-computer-use approach.";
+  "Another agent session is currently using the computer.";
+
+/**
+ * The fixed call order, stated once where every MCP client can surface it to
+ * the model. `request_access` is the hard prerequisite for everything else —
+ * including `screenshot` — and nothing in the tool schemas says so in a place
+ * a model reads before its first call.
+ */
+const SERVER_INSTRUCTIONS =
+  "Desktop control for Windows. Fixed order: (1) request_access with the apps " +
+  "you need and a one-sentence reason — the user approves in one dialog, and " +
+  "EVERY other tool here, screenshot included, returns an error until that has " +
+  "happened; (2) screenshot, and read all coordinates off that image; (3) act. " +
+  "Screenshots are downscaled, so use zoom to read small text. The " +
+  "computer-use skill that ships alongside this server documents the tiers, the " +
+  "hit-test gate, batching, and multi-display behaviour — load it before " +
+  "driving the desktop rather than trial-and-erroring against these tools.";
 
 /**
  * Dedupe `granted` into `existing` on bundleId, spread truthy-only flags over
@@ -149,7 +172,8 @@ export function bindSessionContext(
       const lock = await ctx.checkCuLock();
       if (lock.holder !== undefined && !lock.isSelf) {
         const text =
-          ctx.formatLockHeldMessage?.(lock.holder) ?? DEFAULT_LOCK_HELD_MESSAGE;
+          (ctx.formatLockHeldMessage?.(lock.holder) ??
+            DEFAULT_LOCK_HELD_MESSAGE) + LOCK_HELD_GUIDANCE;
         return {
           content: [{ type: "text", text }],
           isError: true,
@@ -168,8 +192,9 @@ export function bindSessionContext(
         const recheck = await ctx.checkCuLock();
         if (recheck.holder !== undefined && !recheck.isSelf) {
           const text =
-            ctx.formatLockHeldMessage?.(recheck.holder) ??
-            DEFAULT_LOCK_HELD_MESSAGE;
+            (ctx.formatLockHeldMessage?.(recheck.holder) ??
+              DEFAULT_LOCK_HELD_MESSAGE) +
+            LOCK_HELD_GUIDANCE;
           return {
             content: [{ type: "text", text }],
             isError: true,
@@ -266,8 +291,17 @@ export function createComputerUseMcpServer(
   const { serverName, logger } = adapter;
 
   const server = new Server(
-    { name: serverName, version: "0.5.0" },
-    { capabilities: { tools: {}, logging: {} } },
+    // Reported over MCP `initialize`. Keep in step with package.json — the
+    // vendor layer can't read it (no node:fs by design), so nothing enforces it.
+    { name: serverName, version: "0.5.1" },
+    {
+      capabilities: { tools: {}, logging: {} },
+      // Surfaced to the model at initialize time, before any call. Agents that
+      // skip the skill doc go straight for `screenshot` and hit an error they
+      // have no context to interpret; this is the cheapest place to state the
+      // fixed order up front.
+      instructions: SERVER_INSTRUCTIONS,
+    },
   );
 
   // The caller may pass a pre-built tool list: the CLI host splices this

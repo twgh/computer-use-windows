@@ -338,13 +338,57 @@ function tierSatisfies(
   return tier === "click" || tier === "full";
 }
 
-// Appended to every tier_insufficient error. The model may try to route
-// around the gate (osascript, System Events, cliclick via Bash) — this
-// closes that door explicitly. Leading space so it concatenates cleanly.
+// Appended to every tier_insufficient error. The model may try to route around
+// the gate, and the available vectors differ per platform: osascript / System
+// Events / cliclick on macOS, PowerShell SendKeys / nircmd on Windows. This
+// backend has a fourth that naming only the macOS ones left open in text — the
+// helper that performs the injection is an ordinary CLI, so
+// `python windows_helper.py click --payload ...` from a shell reproduces any
+// gated action with none of the gates. Leading space so it concatenates cleanly.
 const TIER_ANTI_SUBVERSION =
-  " Do not attempt to work around this restriction — never use AppleScript, " +
-  "System Events, shell commands, or any other method to send clicks or " +
-  "keystrokes to this app.";
+  " Do not attempt to work around this restriction: no shell command " +
+  "(PowerShell SendKeys, nircmd, osascript, cliclick), no directly invoked " +
+  "input helper or other computer-use runtime, and nothing else may send " +
+  "clicks or keystrokes to this app. If this tier blocks what you need, use an " +
+  "action the tier allows, use a purpose-built MCP for that app class, or ask " +
+  "the user to perform it.";
+
+/**
+ * Appended to the three errors that fire on a cold session. An agent that
+ * skipped the skill doc hits exactly these, and a bare "not allowed" reads as
+ * a broken tool — clients often surface that to the user and stop. So each one
+ * names the call that unblocks it, plus the ordering the skill teaches.
+ *
+ * The grant is keyed on the executable path, so a rebuild that relocates the
+ * binary (a `go run` temp dir, a reinstall, a moved portable app) re-triggers
+ * these errors for an app the user already approved. Re-calling request_access
+ * picks up the new path; the previous grant stays valid for the old one.
+ */
+const ACCESS_GATE_GUIDANCE =
+  " To make an app controllable, call request_access with its display name in " +
+  "`apps` and a one-sentence task in `reason` — the user approves the whole " +
+  "list in one dialog, then retry this call. No app is controllable until that " +
+  "happens. If this app was working earlier and stopped, it was probably " +
+  "rebuilt or moved: call request_access again to re-grant the new path. For " +
+  "the full workflow (request_access → screenshot → act, with coordinates " +
+  "read off that screenshot), load the computer-use skill that ships with this " +
+  "server.";
+
+/**
+ * Appended to every `cu_lock_held` error — the three sites that can report a
+ * held lock (the async gate in mcpServer.ts and the sync Gate-3 here, on both
+ * its branches). Exported because mcpServer.ts imports this module, not the
+ * other way round.
+ *
+ * The point is the scope of `release_lock`: a blocked session cannot unblock
+ * itself, and naming the tool without the caveat produces a call that silently
+ * does nothing. Idle takeover is deliberately absent — only the host knows its
+ * own policy, so `formatLockHeldMessage` states it.
+ */
+export const LOCK_HELD_GUIDANCE =
+  " Wait for that session to finish, or find a non-computer-use approach. " +
+  "`release_lock` gives up the lock held by YOUR session only — calling it " +
+  "while another session holds the lock does nothing.";
 
 // ---------------------------------------------------------------------------
 // Clipboard guard — stash+clear while a click-tier app is frontmost
@@ -536,7 +580,8 @@ async function runInputActionGates(
   return errorResult(
     `"${frontmost.displayName}" is not in the allowed applications and is ` +
       `currently in front. Take a new screenshot — it may have appeared ` +
-      `since your last one.`,
+      `since your last one.` +
+      ACCESS_GATE_GUIDANCE,
     "app_not_granted",
   );
 }
@@ -580,9 +625,10 @@ async function runHitTestGate(
     // is the "something popped up" edge case — a new window appeared between
     // screenshot and click, or a background app's window overlaps the target.
     return errorResult(
-      `Click at these coordinates would land on "${target.displayName}", ` +
+      `Input at these coordinates would land on "${target.displayName}", ` +
         `which is not in the allowed applications. Take a fresh screenshot ` +
-        `to see the current window layout.`,
+        `to see the current window layout.` +
+        ACCESS_GATE_GUIDANCE,
       "app_not_granted",
     );
   }
@@ -2115,7 +2161,9 @@ async function handleScreenshot(
   // §2 — empty allowlist → tool error, no screenshot.
   if (overrides.allowedApps.length === 0) {
     return errorResult(
-      "No applications are granted for this session. Call request_access first.",
+      "No applications are granted for this session, so nothing can be " +
+        "captured — screenshots are filtered to the approved app set." +
+        ACCESS_GATE_GUIDANCE,
       "allowlist_empty",
     );
   }
@@ -3730,10 +3778,10 @@ export async function handleToolCall(
   if (lock) {
     if (lock.holder !== undefined && !lock.isSelf) {
       return errorResult(
-        "Another agent session is currently using the computer. Wait for " +
-          "the user to acknowledge it is finished (stop button in the agent " +
-          "window), or find a non-computer-use approach if one is readily " +
-          "apparent.",
+        "Another agent session is currently using the computer. The user may " +
+          "need to acknowledge that that session is finished (stop button in " +
+          "the agent window)." +
+          LOCK_HELD_GUIDANCE,
         "cu_lock_held",
       );
     }

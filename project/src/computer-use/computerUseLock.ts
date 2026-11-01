@@ -38,6 +38,16 @@ function readIdleStealMs(): number {
 const IDLE_STEAL_MS = readIdleStealMs()
 
 /**
+ * Idle threshold in seconds, `0` when takeover is disabled. Exported so the
+ * lock-held error can tell a blocked session how long "wait" actually means
+ * instead of promising an automatic release that `COMPUTER_USE_LOCK_IDLE_SECS=0`
+ * has switched off.
+ */
+export function idleStealSeconds(): number {
+  return Math.floor(IDLE_STEAL_MS / 1000)
+}
+
+/**
  * A live holder whose heartbeat is older than the threshold counts as
  * dormant: it stopped making tool calls without releasing the lock (the
  * usual "both IDEs stay open" case). `0` disables stealing entirely, and

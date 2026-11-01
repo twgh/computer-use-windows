@@ -7,7 +7,7 @@ import type {
   ScreenshotDims,
 } from './vendor/computer-use-mcp/types.js'
 import { DEFAULT_GRANT_FLAGS } from './vendor/computer-use-mcp/types.js'
-import { checkComputerUseLock, releaseComputerUseLock, touchComputerUseLock, tryAcquireComputerUseLock } from './computer-use/computerUseLock.js'
+import { checkComputerUseLock, idleStealSeconds, releaseComputerUseLock, touchComputerUseLock, tryAcquireComputerUseLock } from './computer-use/computerUseLock.js'
 import { saveImageToDisk } from './computer-use/imageSave.js'
 
 type State = {
@@ -117,7 +117,21 @@ export function createSessionContext(): ComputerUseSessionContext {
       }
     },
     releaseCuLock: async () => releaseComputerUseLock(),
-    formatLockHeldMessage: holder =>
-      `Computer use is already in use by another session (${holder.slice(0, 8)}...).`,
+    // The "who holds it and when it frees up" half — the vendor appends
+    // `LOCK_HELD_GUIDANCE` with what a blocked session can actually do, so this
+    // stays factual and does not repeat "wait for them". The idle number lives
+    // here because only this host knows its policy, and promising takeover when
+    // `COMPUTER_USE_LOCK_IDLE_SECS=0` disabled it is worse than saying nothing.
+    // "Normally" is load-bearing: a lock written by a pre-0.5.0 runtime carries
+    // no heartbeat, and those are never taken over.
+    formatLockHeldMessage: holder => {
+      const idle = idleStealSeconds()
+      return (
+        `Computer use is already in use by another session (${holder}). ` +
+        (idle > 0
+          ? `A holder that goes quiet is normally taken over after ${idle}s without computer-use calls.`
+          : `Automatic takeover is disabled on this machine (COMPUTER_USE_LOCK_IDLE_SECS=0).`)
+      )
+    },
   }
 }

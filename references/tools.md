@@ -11,6 +11,7 @@
 - 失败结果带 `isError: true` 与 `telemetry.error_kind`（`telemetry` 在返回 SDK 前被剥离，客户端看不到）。错误文本已分类，不含文件路径等敏感内容。
 - `screenshot` / `zoom` 的 `save_to_disk: true` 会把 JPEG 写入 `%TEMP%\computer-use-windows\`，并在结果里多返回一条文本给出绝对路径。保存失败不会吞掉图像：错误信息与图像一起返回。
 - 除 `request_access` / `list_granted_applications` 外，所有工具都受白名单与 tier 门控（见 `SKILL.md`「权限与门控」）。
+- 服务器在 MCP `initialize` 响应里带 `instructions`（`mcpServer.ts` 的 `SERVER_INSTRUCTIONS`），把「先 `request_access` → 再 `screenshot` → 再动作」的固定顺序前置到模型第一次调用之前，并指向本 skill。是否把它喂给模型由客户端决定，因此冷启动错误文本自身也要能指路（见下文错误码表）。
 
 ## 会话与访问控制
 
@@ -121,7 +122,7 @@
 1. 目标应用**不在白名单** → 拒绝执行，返回 `app_not_granted`：
 
    ```
-   Click at these coordinates would land on "Windows 资源管理器", which is not in the allowed applications. Take a fresh screenshot to see the current window layout.
+   Input at these coordinates would land on "Windows 资源管理器", which is not in the allowed applications. Take a fresh screenshot to see the current window layout. To make an app controllable, call request_access with its display name in `apps` and a one-sentence task in `reason` — ...
    ```
 
 2. 目标应用在白名单但档位不够 → 拒绝执行，返回 `tier_insufficient`（例如右键点在一个 `click` 档应用上：右键菜单可以"粘贴"，等同键盘注入，所以需要 `full`）。
@@ -239,7 +240,7 @@ Windows 特例：桌面窗口归属 `explorer.exe`（显示名可能是「Window
 | `app_not_granted` | 前台应用不在白名单。补一次 `request_access` |
 | `tier_insufficient` | 应用已授权但 tier 不够（如对 `click` tier 应用发键盘输入）。改用允许的动作或换目标应用 |
 | `grant_flag_required` | 缺少 `clipboardRead` / `clipboardWrite` / `systemKeyCombos` 授权 |
-| `cu_lock_held` | 桌面被其他 computer-use 会话占用。等待其结束 |
+| `cu_lock_held` | 桌面被其他 computer-use 会话占用。等对方结束、等空闲接管，或改走非 desktop 路径 |
 | `bad_args` | 参数形状 / 取值 / 范围非法，或引用了不存在的目标（如不存在的显示器名） |
 | `state_conflict` | 调用顺序或状态不对（如左键已按下时再次按下） |
 | `display_error` | 显示器枚举失败（热插拔瞬间等） |
@@ -249,3 +250,12 @@ Windows 特例：桌面窗口归属 `explorer.exe`（显示名可能是「Window
 | `teach_mode_conflict` / `teach_mode_not_active` | teach 相关状态冲突。当前 host 未启用 teach 模式 |
 | `executor_threw` | 底层 helper 抛出异常 |
 | `other` | 未分类 |
+
+### 门控错误文案
+
+错误文本是「没读 skill 就直接调工具」的 agent 唯一会看到的说明，因此四处文案各自承担一段指引，改动时保持分工：
+
+- `ACCESS_GATE_GUIDANCE`（`toolCalls.ts`）—— 拼在 `allowlist_empty` 与两处 `app_not_granted` 尾部：给出可直接照做的 `request_access` 调用形状、"应用重新构建 / 移动过就要重新授权"这一常见成因（`go run` 每次换 temp 目录就是典型），以及"先加载 computer-use skill"。
+- `TIER_ANTI_SUBVERSION`（`toolCalls.ts`）—— 拼在所有 `tier_insufficient` 尾部，也在 `request_access` 的档位说明里前置出现一次。措辞刻意跨平台：点名 PowerShell SendKeys / nircmd / osascript / cliclick，并额外堵住「直接命令行调用 `windows_helper.py`」——本后端的注入器就是个普通 CLI，绕开门控重放任意动作只需一条命令，只写 macOS 那几个工具名等于给这条路留着门。
+- `LOCK_HELD_GUIDANCE`（`toolCalls.ts` 导出，`mcpServer.ts` 与 Gate-3 共用）—— 拼在 host 的 `formatLockHeldMessage` 结果与默认文案之后，三处 `cu_lock_held` 出口都覆盖，只讲被挡住这一方能做什么，重点澄清 `release_lock` **只能释放本会话**的锁（否则模型会去调一个注定无效的工具）。空闲接管的具体秒数不在这里说：只有 host 知道自己的策略，`COMPUTER_USE_LOCK_IDLE_SECS=0` 时给出接管承诺比不承诺更糟，所以由 `session.ts` 按实际配置生成。
+- `SERVER_INSTRUCTIONS`（`mcpServer.ts`）—— 见「通用约定」，是唯一前置到首次调用之前的文案位。

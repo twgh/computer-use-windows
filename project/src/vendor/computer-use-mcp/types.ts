@@ -378,8 +378,11 @@ export interface ComputerUseSessionContext {
    *  Returns true when a held lock was released, false when nothing was held
    *  by this session. Undefined → `release_lock` reports it as unsupported. */
   releaseCuLock?(): Promise<boolean>;
-  /** Host-specific lock-held error text. Default is the package's generic
-   *  message. The CLI host includes the holder session-ID prefix. */
+  /** Host-specific lock-held error text — the "who holds it and when it frees
+   *  up" half. `LOCK_HELD_GUIDANCE` is appended to whatever this returns, so
+   *  keep it factual and skip the advice. Default is the package's generic
+   *  sentence. The CLI host names the holder and states its own idle-takeover
+   *  threshold, which the shared tail deliberately does not. */
   formatLockHeldMessage?(holder: string): string;
 
   /** User-abort signal. Passed through to `ComputerUseOverrides.isAborted`

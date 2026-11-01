@@ -1,4 +1,4 @@
-# Windows 电脑使用 Skill 0.5.0
+# Windows 电脑使用 Skill 0.5.1
 
 ## 项目定位
 
@@ -180,6 +180,23 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。
 
 ## 更新日志
+
+### 0.5.1：修好 `scroll` 的滚轮量，并让门控错误自己指路
+
+**`scroll` 此前对自绘控件完全无效。** 症状是「工具返回 `Scrolled.`，页面纹丝不动」。根因不在 Windows 的滚轮投递方式，而在注入量：helper 走 `pyautogui.scroll()`，而它的 win32 实现把「格数」原样塞进 `mouse_event` 的 `dwData`，**从不乘 `WHEEL_DELTA(120)`** —— `scroll_amount: 3` 实际发出 delta=3，即 1/40 格。自绘控件（XCGUI / DirectUI）按 `delta / 120` 取整算行数，直接归零；浏览器会把小数 deltaY 累加掉，所以这条路径在浏览器里「看起来是好的」，一直掩盖着它。此外 pyautogui 的符号约定与 executor 的屏幕坐标 `dy` 相反（正数 = 向上滚），且它 `except (PermissionError, OSError): pass` 吞掉注入错误 —— 永远不会报错，只会静默无效。现在两个轴都自己乘 120、纵向按 `dy` 取负。
+
+实测（XCGUI demo，同一落点，窗口区域像素差分 + 「只移光标不滚」对照组）：delta ±3 / ±30 → 0.00%；-120 → 15.83%；-360 → 14.75%。修复后 up / down 端到端复测通过。`PostMessage(WM_MOUSEWHEEL)` 同样能滚，但并不需要它 —— 硬件式注入本来就够，问题从来是量不够。
+
+**门控错误与握手文案现在会把 agent 带到正确的下一步。** 不少客户端里的 agent 不加载 skill 就直接调 MCP 工具，第一个动作往往是 `screenshot`，必然失败；而原来的错误只说「不允许」，读起来像工具坏了。现在四层各就各位，分工记录在 `references/tools.md`「门控错误文案」：
+
+- MCP `initialize` 新增 `instructions` —— 唯一前置到首次调用之前的文案位，写明 `request_access → screenshot → act` 的固定顺序。
+- `ACCESS_GATE_GUIDANCE` 拼在 `allowlist_empty` 与两处 `app_not_granted` 尾部：给出可直接照做的 `request_access` 形状，并点名一个高频成因 —— 授权记的是 exe 路径，应用重新构建换目录（`go run` 每次换 `go-build<hash>` 临时目录）、重装、便携应用被移动之后，已授权应用会重新变成「不在白名单」。
+- `TIER_ANTI_SUBVERSION` 改为跨平台措辞，并补上原先只点名 macOS 工具时留着的那扇门：直接命令行调用 `windows_helper.py` 的子命令可以绕开全部门控。
+- `cu_lock_held` 的三个出口统一拼上 `LOCK_HELD_GUIDANCE`，澄清 `release_lock` 只能释放本会话的锁；空闲接管的具体秒数改由 host 按 `COMPUTER_USE_LOCK_IDLE_SECS` 实际值生成，`=0` 时不再给出根本不存在的接管承诺。
+
+顺带：落点校验的文案不再写死 `Click at these coordinates`（`scroll` 与拖拽同样走这条路径）；`SKILL.md` frontmatter 的版本号从 0.4.2 补齐（0.5.0 发布时漏了这一处）。
+
+实测：`npm run build` 与 `npm run check` 通过；`instructions` 经真实 stdio 握手确认已下发；两条 `cu_lock_held` 组合文案（默认 300 秒 / `COMPUTER_USE_LOCK_IDLE_SECS=0`）走代码路径渲染核对，确认 host 与 vendor 两半不重复、不矛盾。
 
 ### 0.5.0：会话锁可释放了（心跳空闲接管 + `release_lock`）
 

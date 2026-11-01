@@ -51,12 +51,12 @@
 | 错误 | 原因 | 处置 |
 | --- | --- | --- |
 | `allowlist_empty` | 还没申请任何应用 | 先调 `request_access` |
-| `app_not_granted` | 前台应用不在白名单 | 补一次 `request_access` 把该应用加入；或先 `open_application` 把已授权应用置前 |
-| `tier_insufficient` | 应用已授权但档位不足（对 `click` tier 的应用发键盘输入 / 右键） | 换用同档位允许的动作，或换目标应用；**不要**试图绕开门控（不要用 `open_application`、shell、脚本等方式代替受控输入） |
+| `app_not_granted` | 前台应用不在白名单。**也包括"看着在名单里"**：授权记的是可执行文件路径，应用重新构建换目录（`go run` 每次换 `go-build<hash>` 临时目录）、重装、便携应用被移动，都会让原本已授权的应用重新撞上这个错误 | 补一次 `request_access` 把该应用加入（会解析到新的运行路径）；或先 `open_application` 把已授权应用置前。用 `list_granted_applications` 对比名单里的 `bundleId` 与进程实际路径即可确认 |
+| `tier_insufficient` | 应用已授权但档位不足（对 `click` tier 的应用发键盘输入 / 右键） | 换用同档位允许的动作，或换目标应用；**不要**试图绕开门控（不要用 `open_application`、shell、脚本、`SendKeys` / `nircmd`，也不要直接调用 `project/runtime/windows_helper.py` 的子命令 —— 它是普通 CLI，绕过去就等于绕过了全部门控） |
 | `grant_flag_required` | 缺少 `clipboardRead` / `clipboardWrite` / `systemKeyCombos` | 重新 `request_access` 并显式带上对应 flag |
 | `bad_args` | 参数非法；常见于 `switch_display` 传了不存在的显示器名 | 读错误信息里列出的可用显示器名，原样重传 |
 | `state_conflict` | 调用顺序问题，如左键已按下时再次 `left_mouse_down` | 先 `left_mouse_up` 复位状态 |
-| `cu_lock_held` | 桌面被另一个 computer-use 会话占用 | 等待对方结束。若确认持有者已崩溃，可删除 `~/.computer-use-windows/computer-use.lock` |
+| `cu_lock_held` | 桌面被另一个 computer-use 会话占用 | 等对方结束，或等空闲接管（默认 300 秒无心跳后被接管）。`release_lock` 只能释放**本会话**的锁，此时调用是空操作。若确认持有者进程已崩溃，可删除 `~/.computer-use-windows/computer-use.lock` |
 | `display_error` | 显示器枚举失败（热插拔瞬间等） | 稍后重试 |
 | `feature_unavailable` | 会话未接线该能力 | 重启 server |
 
@@ -74,6 +74,15 @@
 
 - 输入工具作用于**当前前台**窗口。先 `open_application` 把目标应用带到前台，必要时先 `left_click` 点进具体输入控件。
 - 运行时不隐藏窗口，其他窗口可能挡在目标之上；多屏场景先确认截的是哪块屏（`screenshot` 的说明文本 + `switch_display`）。
+
+### 滚动返回成功但页面不动
+
+`scroll` 返回 `Scrolled.` 而画面没变化，先分清两类原因：
+
+- **注入的滚轮量不足一格**。Windows 的 `WM_MOUSEWHEEL` 按 `delta / WHEEL_DELTA(120)` 决定滚几行：自绘控件（XCGUI / DirectUI）整数取整后归零，浏览器则累加成不可见的小数位移。helper 早期版本走 `pyautogui.scroll()`，而它把"格数"原样当作 delta 传下去，3 格变成 delta=3 —— 症状正是"永远返回成功、永远不动"。现在两个轴都自己乘 120，细节与实测数据见 `references/runtime.md`「Windows 适配要点」。
+- **根本没注入**。这种情况下工具返回的是错误而不是 `Scrolled.`，按上面「门控类错误」处理。
+
+判断"到底动没动"时别只看像素差：移动光标本身会触发 hover 重绘、置前会改标题栏配色。做一次对照 —— 先只 `mouse_move` 到同一点并截图，确认画面不变，再 `scroll` 截图比对。
 
 ### 中文 / 全角标点输入异常
 

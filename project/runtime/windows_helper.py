@@ -138,6 +138,7 @@ CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
 TOKEN_QUERY = 0x0008
 TOKEN_ELEVATION = 20
+WHEEL_DELTA = 120  # one wheel notch, in mouse_event dwData units
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -1028,11 +1029,16 @@ def click(
 
 
 def scroll(x: int, y: int, delta_x: int, delta_y: int, animate: bool = False) -> None:
+    # Not pyautogui.scroll(): it forwards its "clicks" argument into mouse_event's
+    # dwData unscaled, so 3 notches arrive as a wheel delta of 3 — a 1/40 notch that
+    # self-drawn toolkits (XCGUI, DirectUI) floor to zero lines and browsers render as
+    # sub-pixel drift. Its sign convention is also inverted relative to the executor's
+    # screen-coordinate dy. Both axes are scaled here instead.
     move_pointer(x, y, animate)
     if delta_y:
-        pyautogui.scroll(int(delta_y), x=x, y=y)
+        win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, -int(delta_y) * WHEEL_DELTA, 0)
     if delta_x:
-        win32api.mouse_event(win32con.MOUSEEVENTF_HWHEEL, 0, 0, int(delta_x), 0)
+        win32api.mouse_event(win32con.MOUSEEVENTF_HWHEEL, 0, 0, int(delta_x) * WHEEL_DELTA, 0)
 
 
 def key_action(sequence: str, repeat: int = 1) -> None:
