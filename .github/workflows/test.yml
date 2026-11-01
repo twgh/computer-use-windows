@@ -1,0 +1,62 @@
+name: test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Windows-only by design: the helper imports pywin32 and calls user32, and
+    # the stdio stage exercises Win32 window and gate behaviour. There is no
+    # Linux/macOS job because there is nothing to run there.
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # package.json requires >=20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache the Python venv
+        uses: actions/cache@v4
+        with:
+          path: project/.runtime/venv
+          key: venv-${{ runner.os }}-py3.12-${{ hashFiles('project/runtime/requirements.txt') }}
+
+      - name: Install Node dependencies
+        working-directory: project
+        run: npm ci
+
+      - name: Create the runtime venv
+        # Locally the server self-bootstraps this on the first tool call, but the
+        # unit tests import windows_helper.py directly — nothing would trigger
+        # it, and the runner would fall back to an interpreter without pywin32.
+        run: |
+          if (-not (Test-Path project/.runtime/venv/Scripts/python.exe)) {
+            python -m venv project/.runtime/venv
+            project/.runtime/venv/Scripts/python.exe -m pip install --upgrade pip
+            project/.runtime/venv/Scripts/python.exe -m pip install -r project/runtime/requirements.txt
+          }
+
+      - name: Run the test pipeline
+        # build + typecheck + skill structure + version-site consistency +
+        # Python and TS unit tests + a real MCP stdio session.
+        # No desktop is attached to a GitHub runner, so the stdio stage may
+        # report fewer monitors; its assertions are environment-tolerant by
+        # design. It injects no input and touches no user window.
+        run: python scripts/run_tests.py

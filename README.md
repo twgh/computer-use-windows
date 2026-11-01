@@ -83,6 +83,8 @@ python scripts/run_tests.py --list     # 列出阶段与实际命令
 cd project && npm test                 # 等价入口
 ```
 
+CI 跑的就是同一个入口：`.github/workflows/test.yml`，`windows-latest` 单 job，push 到 `master` / PR / 手动触发。它显式建 `project/.runtime/venv`（本地是 server 首次调用时自举，而单测直接 import helper，没有任何东西会触发那个自举），并按 `requirements.txt` 哈希缓存。无桌面 runner 上监视器可能为空，stdio 阶段的相关断言只查错误形状不查具体标签。
+
 | 阶段 | 覆盖 |
 | --- | --- |
 | build / typecheck | `tsc` 编译与类型检查 |
