@@ -47,13 +47,15 @@ scripts/
 | `COMPUTER_USE_COORDINATE_MODE` | `pixels` \| `normalized_0_100` | `pixels` | 坐标语义；同时决定工具描述里呈现的坐标系文案 |
 | `COMPUTER_USE_DEBUG` | `1` 开启 | 关闭 | 调试日志到 stderr（前缀 `[computer-use]`） |
 
-`COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 在**模块加载时求值一次**（`project/src/computer-use/gates.ts`），运行期修改无效，必须重启进程。
+**环境变量的生效边界**：所有变量都在 **server 进程启动时**从 MCP 配置的 `env` 注入，之后成为该进程 `process.env` 的副本。下文说的「每次调用 / 每次截图重新读取」，只是说代码没有把值缓存成模块常量，读的仍是这份副本 —— 运行中的进程看不到外部对配置或系统环境变量的修改。因此**改任何配置都要重启 server 进程**（多数客户端需要重新加载 MCP 配置）；只有进程内直接改 `process.env` 才可能免重启，普通用法做不到。
+
+`COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 还在**模块加载时求值一次**（`project/src/computer-use/gates.ts`），是真正的常量；其余开关至少在进程内是每次读取的，但对使用者而言同样需要重启。
 
 坐标模式必须与工具描述保持一致：描述文案在构建工具清单时按同一常量固化，两者不一致会导致点击落点错误。
 
 ### 子开关
 
-每次调用（或每次截图）重新读取，运行期改动无需重启：
+每次调用（或每次截图）重新读取；env 值仍来自进程启动时，改配置需重启 server：
 
 | 变量 | 取值 | 默认 | 作用 |
 | --- | --- | --- | --- |
@@ -65,7 +67,7 @@ scripts/
 | `COMPUTER_USE_FOCUS_BEFORE_ACTION` | `0` 关闭 | 开启 | 动作前把已授权应用窗口置前（Windows 语义，不隐藏任何窗口）。注意这会让某个已授权窗口跳到前台，从而遮挡其他窗口 |
 | `COMPUTER_USE_COORD_GRID` | `1` 开启 | **关闭** | 可选：全屏截图叠加淡坐标网格与像素标签；默认关闭以保持图像干净，`normalized_0_100` 模式始终不画 |
 
-`COMPUTER_USE_COORD_GRID` 由 `getCoordinateGridEnabled()` 在**每次截图**时读取并随 payload 下发给 helper；其余子开关由 `getChicagoSubGates()` 在每次调用时读取。
+`COMPUTER_USE_COORD_GRID` 由 `getCoordinateGridEnabled()` 在**每次截图**时读取并随 payload 下发给 helper；其余子开关由 `getChicagoSubGates()` 在每次调用时读取。这些读取都落在进程自己的 `process.env` 上，改 MCP 配置后仍需重启 server（见上文「环境变量的生效边界」）。
 
 ### 图像预算
 
@@ -86,7 +88,7 @@ scripts/
 - 调高预算应同时使用 `COMPUTER_USE_COORDINATE_MODE=normalized_0_100`：百分比坐标的换算不依赖图像像素尺寸，不受下游重缩影响；
 - 想"看清细节"应先考虑 `zoom`：它把区域裁出来再放大，预算作用在那一小块上，同一屏幕面积的有效像素比整屏截图高得多。
 
-两个变量每次截图前重新读取，改动无需重启。
+两个变量每次截图前重新读取；但 env 值来自进程启动时，改配置后仍需重启 server。
 
 > 本节的数字（预算、缩放后的尺寸、比例）**只服务于运行者与排障**，不是给模型用的换算依据。模型侧拿到的规则是"截图图像像素原样传回"，server 与 `coordinateFrame.ts` 会在每个工具结果里重复它；模型若拿本节的比例自行乘坐标，会被二次换算。
 

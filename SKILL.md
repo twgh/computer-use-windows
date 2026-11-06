@@ -89,7 +89,7 @@ Python 侧无需手动准备，也不会在构建期安装。
 | `COMPUTER_USE_COORD_GRID` | `1` 开启 | 关闭 | 可选：全屏截图叠加淡坐标网格与像素标签。默认关闭以保持图像干净；`normalized_0_100` 模式始终不画 |
 | `COMPUTER_USE_DEBUG` | `1` 开启 | 关闭 | 调试日志输出到 stderr（`[computer-use]` 前缀） |
 
-`COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 在 **server 进程启动时读取一次**，改动后必须重启进程才生效；`COMPUTER_USE_COORD_GRID` 每次截图重新读取，无需重启。完整变量表（含子开关）见 `references/runtime.md`。
+所有环境变量都在 **server 进程启动时**从 MCP 配置的 `env` 注入，改配置后必须重启 server 才生效；`COMPUTER_USE_ENABLED` / `COMPUTER_USE_COORDINATE_MODE` 还会在模块加载时求值一次。文档里说的「每次截图重新读取」只是没有把值缓存成常量，读的仍是启动时那份副本，**不等于改配置免重启**。完整变量表（含子开关）见 `references/runtime.md`。
 
 ## 三、核心工作流
 

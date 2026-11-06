@@ -100,10 +100,11 @@ export function createCliExecutor(opts: {
     throw new Error(`createCliExecutor called on ${process.platform}. Computer control is Windows-only.`)
   }
 
-  // Resolved per action, not captured at construction: flipping
-  // COMPUTER_USE_MOUSE_ANIMATION mid-session takes effect on the next click
-  // without restarting the server. The helper owns the distance → duration
-  // math (it already has the cursor position, so this stays one round trip).
+  // Resolved per action, not captured at construction (the helper owns the
+  // distance → duration math, so this stays one round trip). The value still
+  // comes from process.env inherited at process start: editing the MCP config
+  // requires a server restart; only an in-process env change would land on
+  // the next click.
   const animate = (): boolean => opts.getMouseAnimationEnabled()
 
   return {

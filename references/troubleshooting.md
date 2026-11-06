@@ -22,9 +22,9 @@
 
 ### 改了环境变量没有生效
 
-`COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 在进程启动时读取一次。必须重启 server 进程（多数客户端需要重新加载 MCP 配置）。
+所有环境变量都在 **server 进程启动时**从 MCP 配置的 `env` 注入：改配置后必须重启 server 进程（多数客户端需要重新加载 MCP 配置）。
 
-子开关（`COMPUTER_USE_MOUSE_ANIMATION`、`COMPUTER_USE_FOCUS_BEFORE_ACTION`、`COMPUTER_USE_CLIPBOARD_GUARD`、图像预算等）每次工具调用重新读取，改动即时生效，无需重启。
+`COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 还在模块加载时求值一次，是真正的常量；子开关（`COMPUTER_USE_MOUSE_ANIMATION`、`COMPUTER_USE_FOCUS_BEFORE_ACTION`、`COMPUTER_USE_CLIPBOARD_GUARD`、`COMPUTER_USE_COORD_GRID`、图像预算等）每次工具调用 / 每次截图重新读取，但读的仍是启动时那份 `process.env` ——「每次读取」只表示没有缓存成模块常量，**不等于改配置免重启**。
 
 ## 二、Python 自举
 

@@ -28,8 +28,10 @@ export function getChicagoCoordinateMode(): CoordinateMode {
  * overlay.
  *
  * Set COMPUTER_USE_COORD_GRID=1 to enable. Never drawn for normalized_0_100
- * (labels would describe a space the model is not using). Read per capture,
- * so toggling takes effect without restarting the server.
+ * (labels would describe a space the model is not using). Read per capture
+ * (no module-level cache), but process.env is inherited at process start:
+ * editing the MCP config still requires a server restart; only an in-process
+ * process.env change would take effect without one.
  */
 export function getCoordinateGridEnabled(): boolean {
   return (
