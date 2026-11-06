@@ -62,6 +62,11 @@ def stages(quick: bool) -> list[tuple[str, list[str], str]]:
             ".",
         ),
         (
+            "package allowlist   (Python)",
+            [str(helper_python), "scripts/tests/test_package_skill.py"],
+            ".",
+        ),
+        (
             "TS layer unit tests",
             ["node", "--test", str(NODE_TESTS[0])],
             ".",

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Package the computer-use-windows skill into a distributable zip.
 
-Only skill-related files are included. Build outputs, dependency trees,
-machine-local runtime data and scratch files are excluded. Zip entries live
-at the archive root (no wrapping directory).
+Only SKILL.md, references/ and project/ are packaged (top-level allowlist);
+everything else at the repository root is development scaffolding (CI config,
+agent rules, docs, editor metadata) and must never ship. Build outputs,
+dependency trees and machine-local runtime data are excluded too. Zip entries
+live at the archive root (no wrapping directory).
 
 Usage:
     python package_skill.py                # -> ./computer-use-windows.zip
@@ -18,6 +20,12 @@ import zipfile
 from pathlib import Path
 
 SKILL_NAME = "computer-use-windows"
+
+# Top-level allowlist: the installed skill consists of exactly these entries.
+# A blacklist silently ships anything new that appears at the repository root
+# (.github, .codebuddy, .vscode, ...) — that is how .github/workflows/test.yml
+# ended up in earlier archives.
+TOP_LEVEL_ENTRIES = {"SKILL.md", "references", "project"}
 
 # Directories excluded anywhere in the tree.
 EXCLUDED_DIRS = {
@@ -64,6 +72,8 @@ def collect_files(skill_root: Path) -> list[Path]:
         if path.is_dir():
             continue
         rel = path.relative_to(skill_root)
+        if rel.parts[0] not in TOP_LEVEL_ENTRIES:
+            continue
         if any(is_excluded_dir(part) for part in rel.parts[:-1]):
             continue
         if is_excluded_file(path.name):

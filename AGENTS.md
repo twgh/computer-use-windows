@@ -21,11 +21,12 @@
 
 1. `python scripts/set_version.py x.y.0`
 2. 在 `README.md`「更新日志」**最前面**追加倒序条目：`### x.y.0：中文一句摘要`，不写日期、不加 `v`、不插链接。
-3. `cd project && npm test` —— 7 阶段必须全绿；`version sites` 阶段校验格式与六处一致性。
+3. `cd project && npm test` —— 8 阶段必须全绿；`version sites` 阶段校验格式与六处一致性。
 4. `python scripts/package_skill.py -o %TEMP%/computer-use-windows-x.y.0.zip`，产物放系统临时目录，不留在仓库。
 5. 中文单行 commit：`x.y.0：摘要`。
 6. **不 push、不打 tag、不建 Release**；仓库无 release workflow，等维护者确认。
 7. `AGENTS.md` 已被 `package_skill.py` 排除，不得进入分发 zip。
+8. 分发 zip 的顶层**只允许** `SKILL.md`、`references/`、`project/` 三项（打包脚本用白名单，不是黑名单）。`.github/`、CI 配置、`AGENTS.md`、`README.md`、`LICENSE`、`scripts/`、构建产物、编辑器 / agent 元数据一律不得进包；`scripts/tests/test_package_skill.py` 是这条规则的回归断言。
 
 ## 三、坐标（改这块之前必读）
 
@@ -46,7 +47,7 @@
 
 ## 五、测试与文件
 
-- 发版前 `npm test` 7 阶段必须全绿；任何代码改动都要跑。
+- 发版前 `npm test` 8 阶段必须全绿；任何代码改动都要跑。
 - 测试只放 `scripts/tests/`；临时产物（截图、裁剪图、zip、日志）一律写系统 `%TEMP%`，**禁止在 skill / project 目录内落盘**，用完删除。
 - 测试不注入鼠标 / 键盘输入、不动用户窗口；需要输入的地方打桩。
 - 新增断言要对应一个真实 bug；修 bug 时想清楚"哪条断言本来能拦住它"。

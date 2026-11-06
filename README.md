@@ -69,7 +69,7 @@
 一个入口跑完全部检查，任一步失败即退出码非零，可直接挂到发布前：
 
 ```bash
-python scripts/run_tests.py            # 全部 7 个阶段，约 6 秒
+python scripts/run_tests.py            # 全部 8 个阶段，约 7 秒
 python scripts/run_tests.py --quick    # 跳过 stdio 集成测试（不碰桌面锁）
 python scripts/run_tests.py --list     # 列出阶段与实际命令
 cd project && npm test                 # 等价入口
@@ -82,6 +82,7 @@ CI 跑的就是同一个入口：`.github/workflows/test.yml`，`windows-latest`
 | build / typecheck | `tsc` 编译与类型检查 |
 | skill structure | `validate_skill.py` —— SKILL.md 结构与引用完整性 |
 | version sites | 六处版本号一致且格式为 `x.y.0`（四处声明 + `package-lock.json` 两处，`set_version.py --check`） |
+| package allowlist | 打包顶层白名单：只收 `SKILL.md` / `references/` / `project/`，拒收 `.github` 等开发期文件 |
 | helper unit tests | Python helper 纯逻辑：滚轮量换算、注册表路径展开、抢焦点不抛异常、窗口聚焦三态、坐标网格绘制与开关透传 |
 | TS layer unit tests | `resolveGrantedApp` 逐级解析、terminal / browser 分类、坐标帧校验、`scaleCoord` 与 `scaleFactor` 解耦 |
 | MCP stdio integration | 真实起 server 走 `initialize`、`tools/list`、门控错误文本与每轮 `[COORD FRAME]` 提醒 |
@@ -102,7 +103,7 @@ cd scripts
 python package_skill.py                # 生成 computer-use-windows.zip
 ```
 
-打包的是纯净的 skill 目录结构，不含构建产物和无关文件
+打包的是纯净的 skill 目录结构：顶层**只允许** `SKILL.md`、`references/`、`project/` 三项（白名单），`.github/`、CI 配置、`AGENTS.md`、`README.md`、`scripts/`、构建产物与本地运行时数据一律不进包。`scripts/tests/test_package_skill.py` 在发布前门禁里守着这条规则。
 
 ## 项目结构
 
