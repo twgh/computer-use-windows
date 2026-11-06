@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Set or verify the version across every place it is declared.
 
+Version format is fixed at x.y.0: the third component is always 0 and is never
+used for counting. Each release increments the first two components in decimal
+(0.5.5 -> 0.6.0 -> ... -> 0.9.0 -> 1.0.0). Both the write mode and --check
+reject anything else, so the rule cannot drift. See AGENTS.md.
+
 The version lives in six sites across five files that nothing links together at
 build time: the vendor layer deliberately never reads package.json (no node:fs
 in that layer), so the MCP `initialize` serverInfo version has to be a literal;
@@ -9,8 +14,8 @@ on a manual version bump. That made drift routine — 0.5.0 shipped with SKILL.m
 still saying 0.4.2, and the lock file stayed at 0.4.2 for several releases.
 
 Usage:
-    python scripts/set_version.py 0.5.3        # write
-    python scripts/set_version.py --check      # verify, exit 1 on drift
+    python scripts/set_version.py 0.6.0        # write
+    python scripts/set_version.py --check      # verify format + drift, exit 1
     python scripts/set_version.py --show       # print what each site says
 
 Exit codes: 0 ok, 1 drift or bad invocation, 2 a site could not be found.
@@ -41,7 +46,8 @@ SITES: list[tuple[str, Path, re.Pattern[str]]] = [
      re.compile(r'"packages":\s*\{\s*"":\s*\{\s*"name":\s*"computer-use-windows",\s*"version":\s*"([^"]+)"')),
 ]
 
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[\w.]+)?$")
+# x.y.0 only. See AGENTS.md — the patch digit is deliberately never used.
+VERSION_RE = re.compile(r"^\d+\.\d+\.0$")
 
 
 def read(path: Path) -> str:
@@ -84,7 +90,11 @@ def main(argv: list[str]) -> int:
                 print(f"{label:24s} {v}")
             print(f"drift: {len(distinct)} different versions in use")
             return 1
-        print(f"consistent: {distinct.pop()}")
+        version = distinct.pop()
+        if not VERSION_RE.match(version):
+            print(f"invalid version {version!r}: expected x.y.0 (patch is always 0)")
+            return 1
+        print(f"consistent: {version}")
         return 0
 
     if mode.startswith("-"):
@@ -94,7 +104,7 @@ def main(argv: list[str]) -> int:
     # The bare positional argument IS the new version.
     value = mode
     if not VERSION_RE.match(value):
-        print(f"not a version: {value!r} (expected e.g. 0.5.3)")
+        print(f"not a version: {value!r} (expected x.y.0, e.g. 0.6.0)")
         return 1
 
     changed = 0

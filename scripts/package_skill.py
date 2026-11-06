@@ -41,6 +41,7 @@ EXCLUDED_FILE_PATTERNS = {
 # Exact file names excluded anywhere in the tree.
 EXCLUDED_FILE_NAMES = {
     "README.md",
+    "AGENTS.md",     # dev-time agent rules, not part of the installed skill
     ".gitattributes",
     ".gitignore",
     "LICENSE",

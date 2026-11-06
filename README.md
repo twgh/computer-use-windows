@@ -1,4 +1,4 @@
-# Windows 电脑使用 Skill 0.5.5
+# Windows 电脑使用 Skill 0.6.0
 
 ## 这个项目是什么
 
@@ -81,7 +81,7 @@ CI 跑的就是同一个入口：`.github/workflows/test.yml`，`windows-latest`
 | --- | --- |
 | build / typecheck | `tsc` 编译与类型检查 |
 | skill structure | `validate_skill.py` —— SKILL.md 结构与引用完整性 |
-| version sites | 六处版本号一致（四处声明 + `package-lock.json` 两处，`set_version.py --check`） |
+| version sites | 六处版本号一致且格式为 `x.y.0`（四处声明 + `package-lock.json` 两处，`set_version.py --check`） |
 | helper unit tests | Python helper 纯逻辑：滚轮量换算、注册表路径展开、抢焦点不抛异常、窗口聚焦三态、坐标网格绘制与开关透传 |
 | TS layer unit tests | `resolveGrantedApp` 逐级解析、terminal / browser 分类、坐标帧校验、`scaleCoord` 与 `scaleFactor` 解耦 |
 | MCP stdio integration | 真实起 server 走 `initialize`、`tools/list`、门控错误文本与每轮 `[COORD FRAME]` 提醒 |
@@ -107,7 +107,8 @@ python package_skill.py                # 生成 computer-use-windows.zip
 ## 项目结构
 
 ```text
-SKILL.md               # 技能入口指引（agent 先读这个）
+AGENTS.md              # 开发期硬规则（agent 改仓库前读；不随 zip 分发）
+SKILL.md               # 技能入口指引（使用 skill 的 agent 先读这个）
 README.md              # 本文件
 references/
   tools.md             # 24 个 MCP 工具的完整参数与错误码
@@ -203,6 +204,16 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。**这些数字是运行者侧实现细节，不是给模型的换算依据**：模型只把截图图像上读到的像素原样传回，server 完成映射，每个工具结果都会用 `[COORD FRAME]` 提醒这一点。截图默认保持干净（适合 UI 开发 / 视觉审查）；需要精确定位时可设 `COMPUTER_USE_COORD_GRID=1` 叠加淡坐标网格，标签数字就是该传的图像像素坐标。
 
 ## 更新日志
+
+### 0.6.0：版本号改为 x.y.0，硬规则写进 AGENTS.md
+
+从这一版起版本号只数前两位：`x.y.0`，第三位固定为 0、不参与计数；前两位按十进制进一（`0.5.5 → 0.6.0 → … → 0.9.0 → 1.0.0`）。此前 0.5.1–0.5.5 每批改动都升 patch，看着像语义化版本其实并不是，现在把规则说死并让工具兜住。
+
+- **规则由脚本强制执行。** `set_version.py` 的 `VERSION_RE` 收紧为 `^\d+\.\d+\.0$`，`--check` 也校验格式：写 `0.6.1` 直接拒绝并退出 1，不再只靠人记。六处版本声明仍由脚本一次同步。
+- **新增 `AGENTS.md`。** 把版本与发版流程、坐标不可二次换算 / 每轮 `[COORD FRAME]` / 帧校验、环境变量生效边界、测试与临时文件、提交约定写成硬规则清单，供后续 agent 直接读。`package_skill.py` 已把它排除出分发 zip —— 开发期规则不进入安装的 skill。
+- **修正环境变量生效边界的措辞。** 上一版文档里「每次读取 = 无需重启」是错的：`process.env` 是进程启动时从 MCP 配置继承的副本，改配置一律要重启 server。同步修正 `SKILL.md`、`references/runtime.md`、`references/troubleshooting.md` 与两处源码注释。
+
+实测：`set_version.py 0.6.1` 返回 `not a version ... expected x.y.0` 且退出码 1；`set_version.py 0.6.0` 六处同步，`--check` 输出 `consistent: 0.6.0`；`npm test` 7 阶段全绿；打包文件清单不含 `AGENTS.md`。
 
 ### 0.5.5：把坐标规则从「要记住」改成「每次都看见、算错就拒绝」
 
