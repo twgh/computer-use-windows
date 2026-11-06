@@ -38,6 +38,11 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { randomUUID } from "node:crypto";
 
+import {
+  COORD_MONITOR_DISCLAIMER,
+  COORD_RULE,
+  validateModelCoordinateFrame,
+} from "./coordinateFrame.js";
 import { getDefaultTierForApp, getDeniedCategoryForApp, isPolicyDenied } from "./deniedApps.js";
 import type {
   ComputerExecutor,
@@ -227,7 +232,7 @@ function scaleCoord(
   mode: CoordinateMode,
   display: DisplayGeometry,
   lastScreenshot: ScreenshotResult | undefined,
-  logger: Logger,
+  _logger: Logger,
 ): { x: number; y: number } {
   if (mode === "normalized_0_100") {
     // Origin offset targets the selected display in virtual-screen space.
@@ -255,16 +260,16 @@ function scaleCoord(
     };
   }
 
-  // Cold start: model sent pixel coords without having taken a screenshot.
-  // Degenerate — fall back to the old /sf behavior and warn.
-  logger.warn(
-    "[computer-use] pixels-mode coordinate received with no prior screenshot; " +
-      "falling back to /scaleFactor. Click may be off if downsample is active.",
+  // No screenshot anchor: refuse instead of guessing. `dispatchAction`'s
+  // frame gate rejects this before any handler runs, so this is a defence for
+  // the remaining (teach_*) callers. The old `/scaleFactor` fallback is gone:
+  // it produced a plausible-but-wrong click, which taught the model that
+  // doing its own DPI math "mostly works" and fed the drifting-ratio failure.
+  throw new Error(
+    "[COORD FRAME] No screenshot anchor: call screenshot first, then read " +
+      "coordinates off the returned image. " +
+      COORD_RULE,
   );
-  return {
-    x: Math.round(rawX / display.scaleFactor) + display.originX,
-    y: Math.round(rawY / display.scaleFactor) + display.originY,
-  };
 }
 
 /**
@@ -2130,17 +2135,24 @@ async function buildMonitorNote(
         switchHint
       : "";
 
+  // Monitor labels carry resolution + scale figures. They are needed to tell
+  // monitors apart, but in a long session they are also the numbers a model
+  // reaches for when it starts "correcting" image-pixel coordinates. Neutralise
+  // them at the source rather than removing the disambiguation.
+  const noMath = ` ${COORD_MONITOR_DISCLAIMER}`;
+
   // 0 is kCGNullDirectDisplay (sentinel from old sessions persisted
   // pre-multimon) — treat same as undefined.
   if (lastDisplayId === undefined || lastDisplayId === 0) {
-    return `This screenshot was taken on monitor "${current}".` + othersList;
+    return `This screenshot was taken on monitor "${current}".` + othersList + noMath;
   }
   if (lastDisplayId !== shotDisplayId) {
     const prev = nameOf(lastDisplayId);
     return (
       `This screenshot was taken on monitor "${current}", which is different ` +
       `from your previous screenshot (taken on "${prev}").` +
-      othersList
+      othersList +
+      noMath
     );
   }
   return undefined;
@@ -2428,7 +2440,10 @@ async function handleZoom(
   }
   if (x1 > last.width || y1 > last.height) {
     return errorResult(
-      `region exceeds screenshot bounds (${last.width}×${last.height})`,
+      `[COORD FRAME] region exceeds the last screenshot image ` +
+        `(${last.width}x${last.height}); those are image bounds, not a conversion factor. ` +
+        "Read the region off the full-screen screenshot, not the zoomed image. " +
+        COORD_RULE,
       "bad_args",
     );
   }
@@ -3685,6 +3700,16 @@ async function dispatchAction(
   overrides: ComputerUseOverrides,
   subGates: CuSubGates,
 ): Promise<CuCallToolResult> {
+  // ─── Coordinate frame gate ────────────────────────────────────────────
+  // One choke point for both standalone calls and every action inside
+  // `computer_batch`. Runs BEFORE any gate that could move the mouse, so a
+  // re-scaled coordinate never turns into a real click on the wrong target.
+  const frameError = validateModelCoordinateFrame(name, a, {
+    mode: overrides.coordinateMode,
+    screenshot: overrides.lastScreenshot,
+  });
+  if (frameError) return errorResult(frameError, "bad_args");
+
   switch (name) {
     case "screenshot":
       return handleScreenshot(adapter, a, overrides, subGates);

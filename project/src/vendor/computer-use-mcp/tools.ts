@@ -11,19 +11,35 @@
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
+import { COORD_MONITOR_DISCLAIMER } from "./coordinateFrame.js";
 import type { CoordinateMode } from "./types.js";
 
 // See packages/desktop/computer-use-mcp/COORDINATES.md before touching any
 // model-facing coordinate text. Chrome's browserTools.ts:143 is the reference
-// phrasing — "pixels from the left edge", no geometry, no number to do math with.
+// phrasing — "pixels from the left edge", no geometry, no number to do math
+// with. The prohibition is explicit (not just "the server handles scaling"):
+// in long sessions models re-derive a DPI / resize ratio and multiply image
+// pixels by it, which double-scales every click.
+const NO_CONVERSION_SUFFIX =
+  " Do NOT rescale: never multiply or divide by DPI, display resolution, or " +
+  "an image-resize ratio — the server maps image pixels to the screen.";
+// The batch item schema is built outside the coordinateMode closure, so its
+// wording has to hold for BOTH conventions.
+const BATCH_COORD_SUFFIX =
+  " Same coordinate convention as the standalone actions: send the value " +
+  "verbatim, with no DPI / resolution / resize math.";
 const COORD_DESC: Record<CoordinateMode, { x: string; y: string }> = {
   pixels: {
-    x: "Horizontal pixel position read directly from the most recent screenshot image, measured from the left edge. The server handles all scaling.",
-    y: "Vertical pixel position read directly from the most recent screenshot image, measured from the top edge. The server handles all scaling.",
+    x:
+      "Horizontal pixel position copied verbatim from the most recent full-screen screenshot image, measured from its left edge." +
+      NO_CONVERSION_SUFFIX,
+    y:
+      "Vertical pixel position copied verbatim from the most recent full-screen screenshot image, measured from its top edge." +
+      NO_CONVERSION_SUFFIX,
   },
   normalized_0_100: {
-    x: "Horizontal position as a percentage of screen width, 0.0–100.0 (0 = left edge, 100 = right edge).",
-    y: "Vertical position as a percentage of screen height, 0.0–100.0 (0 = top edge, 100 = bottom edge).",
+    x: "Horizontal position as a percentage of screen width, 0.0–100.0 (0 = left edge, 100 = right edge). Send it verbatim; never convert it to or from pixel values.",
+    y: "Vertical position as a percentage of screen height, 0.0–100.0 (0 = top edge, 100 = bottom edge). Send it verbatim; never convert it to or from pixel values.",
   },
 };
 
@@ -67,7 +83,8 @@ const BATCH_ACTION_ITEM_SCHEMA = {
       minItems: 2,
       maxItems: 2,
       description:
-        "(x, y) for click/mouse_move/scroll/left_click_drag end point.",
+        "(x, y) for click/mouse_move/scroll/left_click_drag end point." +
+        BATCH_COORD_SUFFIX,
     },
     start_coordinate: {
       type: "array",
@@ -75,7 +92,8 @@ const BATCH_ACTION_ITEM_SCHEMA = {
       minItems: 2,
       maxItems: 2,
       description:
-        "(x, y) drag start — left_click_drag only. Omit to drag from current cursor.",
+        "(x, y) drag start — left_click_drag only. Omit to drag from current cursor." +
+        BATCH_COORD_SUFFIX,
     },
     text: {
       type: "string",
@@ -155,6 +173,14 @@ export function buildComputerUseTools(
       ? "Take a screenshot of the primary display. Applications not in the session allowlist are excluded at the compositor level — only granted apps and the desktop are visible."
       : "Take a screenshot of the primary display. On this platform, screenshots are NOT filtered — all open windows are visible. Input actions targeting apps not in the session allowlist are rejected.";
 
+  const screenshotCoordNote =
+    coordinateMode === "normalized_0_100"
+      ? " Coordinates are percentages of the target display, sent verbatim; " +
+        "see the [COORD FRAME] note on every result."
+      : " The returned image is what subsequent click coordinates are relative to. " +
+        "Every tool result restates this in a [COORD FRAME] note." +
+        NO_CONVERSION_SUFFIX;
+
   return [
     {
       name: "request_access",
@@ -202,7 +228,8 @@ export function buildComputerUseTools(
       name: "screenshot",
       description:
         screenshotDesc +
-        " Returns an error if the allowlist is empty. The returned image is what subsequent click coordinates are relative to.",
+        " Returns an error if the allowlist is empty." +
+        screenshotCoordNote,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -429,7 +456,8 @@ export function buildComputerUseTools(
             type: "string",
             description:
               'Monitor name from the screenshot note (e.g. "Built-in Retina Display", ' +
-              '"LG UltraFine"), or "auto" to re-enable automatic selection.',
+              '"LG UltraFine"), or "auto" to re-enable automatic selection. ' +
+              COORD_MONITOR_DISCLAIMER,
           },
         },
         required: ["display"],
@@ -563,7 +591,9 @@ export function buildComputerUseTools(
         "batching a predictable sequence eliminates all but one. Use this whenever you can predict the outcome of several actions ahead — " +
         "e.g. click a field, type into it, press Return. Actions execute sequentially and stop on the first error. " +
         `${FRONTMOST_GATE_DESC} The frontmost check runs before EACH action inside the batch — if an action opens a non-allowed app, the next action's gate fires and the batch stops there. ` +
-        "Mid-batch screenshot actions are allowed for inspection but coordinates in subsequent clicks always refer to the PRE-BATCH full-screen screenshot.",
+        "Mid-batch screenshot actions are allowed for inspection but coordinates in subsequent clicks always refer to the PRE-BATCH full-screen screenshot. " +
+        "Every coordinate in a batch follows the same rule as a standalone call; see the [COORD FRAME] note on each result." +
+        BATCH_COORD_SUFFIX,
       inputSchema: {
         type: "object" as const,
         properties: {

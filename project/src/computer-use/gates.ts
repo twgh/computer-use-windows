@@ -15,6 +15,30 @@ export function getChicagoCoordinateMode(): CoordinateMode {
 }
 
 /**
+ * Faint coordinate grid on full-screen screenshots, drawn by the Python
+ * helper AFTER the vision-budget resize. Its labels ARE the image-pixel
+ * coordinates the model must send back.
+ *
+ * OPT-IN, default OFF. Most sessions — UI development, visual review,
+ * screenshot evidence — need clean pixels: grid lines get mistaken for UI
+ * separators, obscure alignment and spacing, and land in save_to_disk images.
+ * The long-session rescaling failure is already handled by the per-result
+ * [COORD FRAME] reminder and the frame gate, neither of which modifies the
+ * image. Enable only when precise point-and-click targeting is worth the
+ * overlay.
+ *
+ * Set COMPUTER_USE_COORD_GRID=1 to enable. Never drawn for normalized_0_100
+ * (labels would describe a space the model is not using). Read per capture,
+ * so toggling takes effect without restarting the server.
+ */
+export function getCoordinateGridEnabled(): boolean {
+  return (
+    getChicagoCoordinateMode() === 'pixels' &&
+    process.env.COMPUTER_USE_COORD_GRID === '1'
+  )
+}
+
+/**
  * Pre-action preparation toggle: raise a granted app's window before an input
  * action so the frontmost gate passes in the normal case.
  *

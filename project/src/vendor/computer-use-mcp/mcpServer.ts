@@ -24,6 +24,11 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import {
+  COORD_RULE,
+  COORD_RULE_NORMALIZED,
+  coordinateReminder,
+} from "./coordinateFrame.js";
 import type { ScreenshotResult } from "./executor.js";
 import type { CuCallToolResult } from "./toolCalls.js";
 import {
@@ -58,17 +63,25 @@ const DEFAULT_LOCK_HELD_MESSAGE =
  * The fixed call order, stated once where every MCP client can surface it to
  * the model. `request_access` is the hard prerequisite for everything else —
  * including `screenshot` — and nothing in the tool schemas says so in a place
- * a model reads before its first call.
+ * a model reads before its first call. The coordinate sentence must match the
+ * active mode: telling a normalized-mode client to "read pixels off the image"
+ * is exactly the kind of contradiction that starts a rescaling loop.
  */
-const SERVER_INSTRUCTIONS =
-  "Desktop control for Windows. Fixed order: (1) request_access with the apps " +
-  "you need and a one-sentence reason — the user approves in one dialog, and " +
-  "EVERY other tool here, screenshot included, returns an error until that has " +
-  "happened; (2) screenshot, and read all coordinates off that image; (3) act. " +
-  "Screenshots are downscaled, so use zoom to read small text. The " +
-  "computer-use skill that ships alongside this server documents the tiers, the " +
-  "hit-test gate, batching, and multi-display behaviour — load it before " +
-  "driving the desktop rather than trial-and-erroring against these tools.";
+function serverInstructions(coordinateMode: CoordinateMode): string {
+  return (
+    "Desktop control for Windows. Fixed order: (1) request_access with the apps " +
+    "you need and a one-sentence reason — the user approves in one dialog, and " +
+    "EVERY other tool here, screenshot included, returns an error until that has " +
+    "happened; (2) screenshot; (3) act using the coordinate convention stated " +
+    "in the tool parameters. " +
+    "Every tool result repeats that coordinate rule in a [COORD FRAME] note: " +
+    (coordinateMode === "normalized_0_100" ? COORD_RULE_NORMALIZED : COORD_RULE) +
+    " Screenshots are downscaled, so use zoom to read small text. The " +
+    "computer-use skill that ships alongside this server documents the tiers, the " +
+    "hit-test gate, batching, and multi-display behaviour — load it before " +
+    "driving the desktop rather than trial-and-erroring against these tools."
+  );
+}
 
 /**
  * Dedupe `granted` into `existing` on bundleId, spread truthy-only flags over
@@ -293,14 +306,14 @@ export function createComputerUseMcpServer(
   const server = new Server(
     // Reported over MCP `initialize`. Keep in step with package.json — the
     // vendor layer can't read it (no node:fs by design), so nothing enforces it.
-    { name: serverName, version: "0.5.4" },
+    { name: serverName, version: "0.5.5" },
     {
       capabilities: { tools: {}, logging: {} },
       // Surfaced to the model at initialize time, before any call. Agents that
       // skip the skill doc go straight for `screenshot` and hit an error they
       // have no context to interpret; this is the cheapest place to state the
       // fixed order up front.
-      instructions: SERVER_INSTRUCTIONS,
+      instructions: serverInstructions(coordinateMode),
     },
   );
 
@@ -326,7 +339,18 @@ export function createComputerUseMcpServer(
           request.params.name,
           request.params.arguments ?? {},
         );
-        return result;
+        // Long sessions bury the coordinate rule from SKILL.md / tools/list.
+        // Restate it on EVERY round trip — including errors — so the most
+        // recent tool result always carries the frame. A separate text block
+        // keeps single-line JSON results parseable and leaves content[0]
+        // (what computer_batch's firstTextContent reads) untouched.
+        return {
+          ...result,
+          content: [
+            ...(result.content ?? []),
+            { type: "text" as const, text: coordinateReminder(coordinateMode) },
+          ],
+        };
       },
     );
     return server;

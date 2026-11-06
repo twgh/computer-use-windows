@@ -91,6 +91,11 @@ function textOf(response) {
   return String(content);
 }
 
+/** Structured results are one-line JSON in content[0]; later text blocks are notes. */
+function jsonOf(response) {
+  return JSON.parse(response.result.content[0].text);
+}
+
 const isError = (response) =>
   response?.result?.isError === true || response?.error !== undefined;
 
@@ -122,6 +127,8 @@ test("initialize carries instructions naming request_access as the prerequisite"
   assert.ok(typeof instructions === "string" && instructions.length > 100, "instructions missing");
   assert.match(instructions, /request_access/);
   assert.match(instructions, /screenshot/);
+  assert.match(instructions, /\[COORD FRAME\]/);
+  assert.match(instructions, /Never apply any conversion/);
 });
 
 test("tools/list exposes all 25 tools", async () => {
@@ -149,6 +156,45 @@ test("every tool description is non-empty (honest-descriptions invariant)", asyn
   for (const tool of list.result.tools) {
     assert.ok(tool.description?.trim().length > 10, `${tool.name} has no description`);
   }
+});
+
+test("coordinate params forbid rescaling in standalone AND batch schemas", async () => {
+  const list = await rpc("tools/list", {});
+  const byName = Object.fromEntries(list.result.tools.map((t) => [t.name, t]));
+  assert.match(
+    byName.left_click.inputSchema.properties.coordinate.description,
+    /Do NOT rescale/,
+  );
+  assert.match(
+    byName.mouse_move.inputSchema.properties.coordinate.description,
+    /Do NOT rescale/,
+  );
+  assert.match(
+    byName.computer_batch.inputSchema.properties.actions.items.properties.coordinate
+      .description,
+    /no DPI/,
+  );
+  assert.match(byName.screenshot.description, /\[COORD FRAME\]/);
+  assert.doesNotMatch(
+    byName.screenshot.description,
+    /coordinate grid/,
+    "an opt-in overlay must not be promised in a static tool description",
+  );
+});
+
+test("every tool result restates the coordinate frame, including errors", async (t) => {
+  const ok = await callTool("list_granted_applications", {});
+  if (skipIfLocked(ok, t)) return;
+  const okContent = ok.result.content;
+  assert.equal(okContent.at(-1)?.type, "text");
+  assert.match(okContent.at(-1).text, /^\[COORD FRAME\]/);
+  // The note is a separate block: single-line JSON results stay parseable.
+  assert.doesNotThrow(() => jsonOf(ok));
+
+  const bad = await callTool("zoom", {});
+  if (skipIfLocked(bad, t)) return;
+  assert.ok(isError(bad), textOf(bad));
+  assert.match(bad.result.content.at(-1)?.text ?? "", /^\[COORD FRAME\]/);
 });
 
 test("screenshot on an empty allowlist fails with self-guiding text", async (t) => {
@@ -185,7 +231,7 @@ test("open_application refuses a name matching two grants instead of guessing", 
   // Where only one is installed the call would resolve uniquely and actually
   // launch something, so the case is skipped — the logic itself is covered by
   // the pure `resolveGrantedApp` unit test, which needs no installed apps.
-  const payload = JSON.parse(textOf(granted));
+  const payload = jsonOf(granted);
   if ((payload.granted ?? []).length !== 2) {
     t.skip(`only ${(payload.granted ?? []).length} of the two names is installed here`);
     return;

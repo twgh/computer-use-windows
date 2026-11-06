@@ -53,7 +53,7 @@ scripts/
 
 ### 子开关
 
-每次调用重新读取（`getChicagoSubGates()`）：
+每次调用（或每次截图）重新读取，运行期改动无需重启：
 
 | 变量 | 取值 | 默认 | 作用 |
 | --- | --- | --- | --- |
@@ -63,6 +63,9 @@ scripts/
 | `COMPUTER_USE_AUTO_TARGET_DISPLAY` | `0` 关闭 | 开启 | 截图前把目标显示器自动切到「已授权应用窗口所在的那块屏」；模型用 `switch_display` 显式指定时以模型为准 |
 | `COMPUTER_USE_MOUSE_ANIMATION` | `1` 开启 | **关闭** | 指针缓动：按距离计算 pyautogui tween 时长（2000 px/秒，上限 0.5 秒）。默认关闭（光标瞬移）；只有少数需要"真实指针轨迹"的软件才值得开（悬停才展开的菜单、监听移动的拖放目标），开启后每次点击 / 拖拽 / 移动最多多等约 0.5 秒 |
 | `COMPUTER_USE_FOCUS_BEFORE_ACTION` | `0` 关闭 | 开启 | 动作前把已授权应用窗口置前（Windows 语义，不隐藏任何窗口）。注意这会让某个已授权窗口跳到前台，从而遮挡其他窗口 |
+| `COMPUTER_USE_COORD_GRID` | `1` 开启 | **关闭** | 可选：全屏截图叠加淡坐标网格与像素标签；默认关闭以保持图像干净，`normalized_0_100` 模式始终不画 |
+
+`COMPUTER_USE_COORD_GRID` 由 `getCoordinateGridEnabled()` 在**每次截图**时读取并随 payload 下发给 helper；其余子开关由 `getChicagoSubGates()` 在每次调用时读取。
 
 ### 图像预算
 
@@ -84,6 +87,14 @@ scripts/
 - 想"看清细节"应先考虑 `zoom`：它把区域裁出来再放大，预算作用在那一小块上，同一屏幕面积的有效像素比整屏截图高得多。
 
 两个变量每次截图前重新读取，改动无需重启。
+
+> 本节的数字（预算、缩放后的尺寸、比例）**只服务于运行者与排障**，不是给模型用的换算依据。模型侧拿到的规则是"截图图像像素原样传回"，server 与 `coordinateFrame.ts` 会在每个工具结果里重复它；模型若拿本节的比例自行乘坐标，会被二次换算。
+
+### 坐标网格
+
+**默认关闭**，设 `COMPUTER_USE_COORD_GRID=1` 才开启。理由：网格会污染 UI 开发 / 视觉审查用的截图，可能被误认成 UI 分隔线，也会进入 `save_to_disk` 的存证图；长会话的坐标漂移已由每轮的 `[COORD FRAME]` 提醒与坐标帧校验处理，不依赖这层叠加。仅在需要精确点小控件、且愿意接受图像被改动时开启。
+
+`capture_monitor`（`project/runtime/windows_helper.py`）在**缩放之后、JPEG 编码之前**调用 `draw_coordinate_grid`：每 100px 一条淡线，顶部 / 左侧每 200px 标一个像素标签，标签数字就是图像像素坐标。绘制不改变 `image.size`，所以 `ScreenshotResult.width/height` 与 `scaleCoord` 的换算基准不变。只有 `screenshot` / `resolve_prepare_capture` 两条全屏路径下发 `coordGrid: true`；`zoom` 是重新采集的区域放大图，保持干净。像素陈旧校验的 fresh 图走同一命令、两侧刻度一致；绘制异常会被捕获并降级为无刻度截图，不会让截图失败。`save_to_disk` 写的是同一份 base64，用户拿到的文件也带刻度。
 
 ### 其他
 
@@ -193,9 +204,9 @@ scripts/
 
 - `normalized_0_100`：`x = round(rawX / 100 * display.width) + display.originX`。
 - `pixels`：`x = round(rawX * lastScreenshot.displayWidth / lastScreenshot.width) + lastScreenshot.originX`。比例用的是**截图尺寸**（含长边降采样），不是 `1/scaleFactor`；显示器几何取的是**截图时刻**的快照。
-- 冷启动（无上一张截图）：退化为 `rawX / display.scaleFactor` 并输出 warn 日志。
+- 无上一张截图：`dispatchAction` 的坐标帧校验直接拒绝（`bad_args`）；`scaleCoord` 内也不再有 `rawX / display.scaleFactor` 退化，缺锚点时抛错而不是猜一个落点。这个退化以前会给出"看起来点得动"的假反馈，反过来强化模型自己做 DPI 换算的习惯。
 
-消费坐标的工具：五种点击、`scroll`、`left_click_drag`（起点与终点）、`mouse_move`。`zoom` 的 `region` 单独用同一比例换算。
+坐标帧校验在 `coordinateFrame.ts`：检查无锚点、图像越界（错误文本明确"边界不是换算系数"）与百分比越界；每个工具结果末尾还会由 `mcpServer.ts` 追加一条 `[COORD FRAME]` 文本块，重复"原样传图上的像素、禁止任何换算"的规则。消费坐标的工具：五种点击、`scroll`、`left_click_drag`（起点与终点）、`mouse_move`。`zoom` 的 `region` 单独用同一比例换算，且不改变坐标系。
 
 ## 分层说明
 

@@ -6,8 +6,9 @@
 
 ## 通用约定
 
-- 坐标一律是 `[x, y]` 两元素数组，语义见 `SKILL.md`「坐标规则」。
-- 成功结果为文本；结构化结果以单行 JSON 文本返回（如 `request_access`、`list_granted_applications`、`computer_batch`）。
+- 坐标一律是 `[x, y]` 两元素数组，语义见 `SKILL.md` 开头的「零、坐标」与「坐标规则」：图像像素原样传回，禁止任何 DPI / 分辨率 / 降采样换算。
+- **每个工具返回（含 `isError`）都额外附带一条独立的 `[COORD FRAME]` 文本块**，重复同一条坐标规则。它是长会话中的权威提示：模型不必回想文档，看最近一次工具结果即可。`computer_batch` 内部子动作不重复附带，只在整批结果末尾出现一次。
+- 成功结果为文本；结构化结果以单行 JSON 文本返回（如 `request_access`、`list_granted_applications`、`computer_batch`）。`[COORD FRAME]` 是独立的追加文本块，不会破坏单行 JSON 的解析，也不会改变 `content[0]`。
 - 失败结果带 `isError: true` 与 `telemetry.error_kind`（`telemetry` 在返回 SDK 前被剥离，客户端看不到）。错误文本已分类，不含文件路径等敏感内容。
 - `screenshot` / `zoom` 的 `save_to_disk: true` 会把 JPEG 写入 `%TEMP%\computer-use-windows\`，并在结果里多返回一条文本给出绝对路径。保存失败不会吞掉图像：错误信息与图像一起返回。
 - 除 `request_access` / `list_granted_applications` 外，所有工具都受白名单与 tier 门控（见 `SKILL.md`「权限与门控」）。
@@ -84,6 +85,7 @@
 - 白名单为空时返回错误 `allowlist_empty`，不会返回图像。
 - 返回内容为一段可选文本 + JPEG 图像。文本仅在条件满足时出现：显示器 ≥ 2 块且（首次截图或目标显示器发生变化）时，说明本次截图所在显示器并列出其他显示器；若上次截图后有小动作被隐藏的窗口，会提示原因。
 - 返回的图像就是后续所有点击坐标的参照系。
+- **默认返回干净图像**（适合 UI 开发 / 视觉审查 / 截图存证）。运行者设 `COMPUTER_USE_COORD_GRID=1` 时，全屏截图会叠一层淡坐标网格，顶部 / 左侧标签数字即图像像素坐标，**照抄标签即可得到 `coordinate` 参数**，无需任何换算。网格在缩放后绘制、不改变图像尺寸；`zoom` 放大图与 `normalized_0_100` 模式始终不带网格。`save_to_disk` 保存的是同一份图，开关状态一致。
 
 ### `zoom`
 
@@ -115,9 +117,19 @@
 - `left_mouse_down` / `left_mouse_up`：无参数，作用于当前光标位置。先 `mouse_move` 定位。`left_mouse_down` 在按键已处于按下状态时返回 `state_conflict`；`left_mouse_up` 在未按下时调用是安全的。
 - `cursor_position`：无参数。返回相对最近一张截图的图像像素坐标（尚未截图时按逻辑点返回）。
 
+### 坐标帧校验（先于一切鼠标动作）
+
+`dispatchAction`（`toolCalls.ts`）是所有独立动作与 `computer_batch` 内子动作的共用入口，在触碰任何鼠标能力之前先校验坐标帧：
+
+- `pixels` 模式没有上一张 `screenshot` → 直接拒绝，错误文本要求先截图。不再有"按 `scaleFactor` 粗略换算"的兜底。
+- 坐标超出最近一张截图图像范围 → 拒绝（`bad_args`），并说明图像边界不是换算系数、通常是二次换算造成的。
+- `normalized_0_100` 模式坐标超出 0–100 → 拒绝。
+
+这层只拦明显越界的坐标；乘了较小系数后仍落在图内的二次换算，靠每个结果里的 `[COORD FRAME]` 提醒拦截。
+
 ### 落点校验（hit-test）
 
-**所有鼠标落点类工具在注入输入之前都会检查目标坐标下是哪个应用**（5 种点击、`scroll`、`left_click_drag` 的起点与终点、`mouse_move`、`left_mouse_down` / `left_mouse_up`）。顺序是：坐标换算 → 落点校验 → 真正注入。
+**所有鼠标落点类工具在注入输入之前都会检查目标坐标下是哪个应用**（5 种点击、`scroll`、`left_click_drag` 的起点与终点、`mouse_move`、`left_mouse_down` / `left_mouse_up`）。整体顺序是：坐标帧校验 → 坐标换算 → 落点校验 → 真正注入。
 
 1. 目标应用**不在白名单** → 拒绝执行，返回 `app_not_granted`：
 

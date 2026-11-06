@@ -52,6 +52,15 @@ export { ALL_SUB_GATES_OFF, ALL_SUB_GATES_ON } from "./subGates.js";
 export { API_RESIZE_PARAMS, targetImageSize } from "./imageResize.js";
 export type { ResizeParams } from "./imageResize.js";
 
+export {
+  COORD_MONITOR_DISCLAIMER,
+  COORD_RULE,
+  COORD_RULE_NORMALIZED,
+  coordinateReminder,
+  validateModelCoordinateFrame,
+} from "./coordinateFrame.js";
+export type { CoordinateFrame } from "./coordinateFrame.js";
+
 export { defersLockAcquire, handleToolCall } from "./toolCalls.js";
 export type {
   CuCallTelemetry,

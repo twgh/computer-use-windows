@@ -169,5 +169,97 @@ class TestWheelConstant(unittest.TestCase):
         self.assertEqual(wh.WHEEL_DELTA, 120)
 
 
+class TestCoordinateGrid(unittest.TestCase):
+    """The grid must be drawn on the RESIZED image without changing its size:
+    ScreenshotResult.width/height is what scaleCoord divides by."""
+
+    def test_grid_keeps_dimensions_and_leaves_non_grid_pixels_alone(self):
+        from PIL import Image
+
+        image = Image.new("RGB", (600, 400), (30, 60, 90))
+        out = wh.draw_coordinate_grid(image)
+        self.assertEqual(out.size, image.size)
+        self.assertEqual(out.getpixel((150, 150)), image.getpixel((150, 150)))
+        self.assertNotEqual(out.getpixel((100, 200)), image.getpixel((100, 200)))
+        # Outlined labels cover only glyph strokes, so scan past the x=0/y=0
+        # grid lines instead of asserting on one fixed pixel.
+        self.assertTrue(
+            any(
+                out.getpixel((x, y)) != image.getpixel((x, y))
+                for x in range(2, 30)
+                for y in range(2, 16)
+            ),
+            "top-edge coordinate label must be drawn",
+        )
+
+    def test_tiny_captures_are_left_untouched(self):
+        from PIL import Image
+
+        image = Image.new("RGB", (120, 80), (1, 2, 3))
+        self.assertIs(wh.draw_coordinate_grid(image), image)
+
+    def test_capture_monitor_honours_the_flag(self):
+        from unittest import mock
+
+        class Shot:
+            size = (300, 200)
+            rgb = bytes((30, 60, 90)) * (300 * 200)
+
+        class FakeMSS:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def grab(self, monitor):
+                return Shot()
+
+        calls = []
+        original = wh.draw_coordinate_grid
+
+        def spy(image):
+            calls.append(image.size)
+            return image
+
+        wh.draw_coordinate_grid = spy
+        try:
+            with mock.patch.object(wh.mss, "MSS", return_value=FakeMSS()):
+                monitor = {"left": 0, "top": 0, "width": 300, "height": 200}
+                off = wh.capture_monitor(monitor, None, False)
+                on = wh.capture_monitor(monitor, None, True)
+        finally:
+            wh.draw_coordinate_grid = original
+
+        self.assertEqual(calls, [(300, 200)])
+        for shot in (off, on):
+            self.assertEqual(shot["width"], 300)
+            self.assertEqual(shot["height"], 200)
+
+    def test_capture_display_forwards_the_flag(self):
+        from unittest import mock
+
+        display = {
+            "originX": 0,
+            "originY": 0,
+            "width": 300,
+            "height": 200,
+            "displayId": 1,
+            "id": 1,
+            "isPrimary": True,
+        }
+        seen = []
+
+        def fake_capture(monitor, resize, coord_grid=False):
+            seen.append(coord_grid)
+            return {"base64": "", "width": 300, "height": 200}
+
+        with mock.patch.object(wh, "choose_display", return_value=display), mock.patch.object(
+            wh, "capture_monitor", side_effect=fake_capture
+        ):
+            wh.capture_display(1, None, True)
+        self.assertEqual(seen, [True])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

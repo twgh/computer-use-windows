@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Set or verify the version across every place it is declared.
 
-The version lives in four files that nothing links together at build time: the
-vendor layer deliberately never reads package.json (no node:fs in that layer),
-so the MCP `initialize` serverInfo version has to be a literal. That made
-drift routine — 0.5.0 shipped with SKILL.md still saying 0.4.2.
+The version lives in six sites across five files that nothing links together at
+build time: the vendor layer deliberately never reads package.json (no node:fs
+in that layer), so the MCP `initialize` serverInfo version has to be a literal;
+package-lock.json declares the root version twice and npm does not rewrite it
+on a manual version bump. That made drift routine — 0.5.0 shipped with SKILL.md
+still saying 0.4.2, and the lock file stayed at 0.4.2 for several releases.
 
 Usage:
     python scripts/set_version.py 0.5.3        # write
@@ -30,6 +32,13 @@ SITES: list[tuple[str, Path, re.Pattern[str]]] = [
     ("MCP serverInfo", ROOT / "project" / "src" / "vendor" / "computer-use-mcp" / "mcpServer.ts",
      re.compile(r'\{\s*name:\s*serverName,\s*version:\s*"([^"]+)"\s*\}')),
     ("README title", ROOT / "README.md", re.compile(r"(?m)^# Windows 电脑使用 Skill ([0-9][\w.\-]*)$")),
+    # package-lock declares the root version twice. The root-level one has a
+    # unique 2-space indent; the packages[""] one needs its full context so it
+    # cannot be confused with a dependency's own "version" (also 6 spaces).
+    ("package-lock root", ROOT / "project" / "package-lock.json",
+     re.compile(r'(?m)^  "version": "([^"]+)"')),
+    ("package-lock package", ROOT / "project" / "package-lock.json",
+     re.compile(r'"packages":\s*\{\s*"":\s*\{\s*"name":\s*"computer-use-windows",\s*"version":\s*"([^"]+)"')),
 ]
 
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[\w.]+)?$")

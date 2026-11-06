@@ -60,7 +60,7 @@ import win32com.client
 import win32con
 import win32gui
 import win32process
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 os.environ.setdefault("PYAUTOGUI_HIDE_SUPPORT_PROMPT", "1")
@@ -518,7 +518,89 @@ def choose_display(display_id: int | None) -> dict[str, Any]:
     raise RuntimeError(f"Unknown display: {display_id}")
 
 
-def capture_monitor(monitor: dict[str, int], resize: tuple[int, int] | None = None) -> dict[str, Any]:
+_GRID_STEP = 100
+_GRID_LABEL_STEP = 200
+
+
+def _grid_font():
+    # Pillow >= 10.1 ships a scalable built-in font, so no font file is needed
+    # (the runtime has none bundled). Fall back for older Pillow builds.
+    try:
+        return ImageFont.load_default(size=12)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def draw_coordinate_grid(image: Image.Image) -> Image.Image:
+    """Overlay a faint grid whose labels ARE the coordinates the model sends.
+
+    Drawn AFTER the vision-budget resize and WITHOUT changing image.size, so
+    the labels match ScreenshotResult.width/height and the space scaleCoord
+    expects. The failure this addresses is a long-session model re-deriving a
+    DPI / resize ratio and multiplying image pixels by it: a number printed on
+    the image at that exact pixel cannot be re-derived or forgotten.
+
+    Only the model-facing FULL-SCREEN capture gets this. `zoom` is a fresh
+    crop at a different scale and stays clean (its coordinates are not a
+    coordinate frame), and pixel-staleness comparison sees the same overlay on
+    both shots because it uses the same `screenshot` command.
+    """
+    width, height = image.size
+    if width < 200 or height < 200:
+        return image
+
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    # Paired 1px strokes of opposite colour stay visible on light and dark UI
+    # while remaining faint enough not to disturb text recognition.
+    for x in range(0, width, _GRID_STEP):
+        draw.line([(x, 0), (x, height)], fill=(255, 255, 255, 110), width=1)
+        if x + 1 < width:
+            draw.line([(x + 1, 0), (x + 1, height)], fill=(0, 0, 0, 85), width=1)
+    for y in range(0, height, _GRID_STEP):
+        draw.line([(0, y), (width, y)], fill=(255, 255, 255, 110), width=1)
+        if y + 1 < height:
+            draw.line([(0, y + 1), (width, y + 1)], fill=(0, 0, 0, 85), width=1)
+
+    font = _grid_font()
+    # x labels along the top edge, y labels down the left edge. Labels start
+    # at 0 / label-step respectively so the top-left corner is not double-drawn.
+    # Outlined text instead of an opaque badge: a solid rectangle would hide
+    # the menu bar / tool strip that usually lives in these exact 16 pixels.
+    label_fill = (255, 255, 255, 255)
+    stroke_fill = (0, 0, 0, 235)
+    for x in range(0, width, _GRID_LABEL_STEP):
+        text = str(x)
+        box = draw.textbbox((0, 0), text, font=font)
+        draw.text(
+            (x + 2, 2 - box[1]),
+            text,
+            font=font,
+            fill=label_fill,
+            stroke_width=1,
+            stroke_fill=stroke_fill,
+        )
+    for y in range(_GRID_LABEL_STEP, height, _GRID_LABEL_STEP):
+        text = str(y)
+        box = draw.textbbox((0, 0), text, font=font)
+        draw.text(
+            (2, y + 2 - box[1]),
+            text,
+            font=font,
+            fill=label_fill,
+            stroke_width=1,
+            stroke_fill=stroke_fill,
+        )
+
+    return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+
+
+def capture_monitor(
+    monitor: dict[str, int],
+    resize: tuple[int, int] | None = None,
+    coord_grid: bool = False,
+) -> dict[str, Any]:
     with mss.MSS() as sct:
         raw = sct.grab(monitor)
         image = Image.frombytes("RGB", raw.size, raw.rgb)
@@ -527,13 +609,23 @@ def capture_monitor(monitor: dict[str, int], resize: tuple[int, int] | None = No
     # pure cost (and a pointless chance to perturb pixels).
     if resize and tuple(resize) != image.size:
         image = image.resize(resize, Image.Resampling.LANCZOS)
+    if coord_grid:
+        try:
+            image = draw_coordinate_grid(image)
+        except Exception as exc:
+            # A drawing failure must never cost the model its screenshot.
+            print(f"[computer-use] coordinate grid skipped: {exc}", file=sys.stderr)
     buffer = BytesIO()
     image.save(buffer, format="JPEG", quality=75, optimize=True)
     base64_data = base64.b64encode(buffer.getvalue()).decode("ascii")
     return {"base64": base64_data, "width": image.width, "height": image.height}
 
 
-def capture_display(display_id: int | None, resize: tuple[int, int] | None = None) -> dict[str, Any]:
+def capture_display(
+    display_id: int | None,
+    resize: tuple[int, int] | None = None,
+    coord_grid: bool = False,
+) -> dict[str, Any]:
     display = choose_display(display_id)
     monitor = {
         "left": display["originX"],
@@ -541,7 +633,7 @@ def capture_display(display_id: int | None, resize: tuple[int, int] | None = Non
         "width": display["width"],
         "height": display["height"],
     }
-    result = capture_monitor(monitor, resize)
+    result = capture_monitor(monitor, resize, coord_grid)
     result.update(
         {
             "displayWidth": display["width"],
@@ -1357,7 +1449,9 @@ def main() -> int:
             resize = None
             if payload.get("targetWidth") and payload.get("targetHeight"):
                 resize = (int(payload["targetWidth"]), int(payload["targetHeight"]))
-            result = capture_display(payload.get("displayId"), resize)
+            result = capture_display(
+                payload.get("displayId"), resize, bool(payload.get("coordGrid"))
+            )
             json_output({"ok": True, "result": result})
             return 0
         if command == "resolve_prepare_capture":
@@ -1373,7 +1467,7 @@ def main() -> int:
                 display_id = choose_display_for_apps(
                     list(payload.get("allowlistBundleIds") or [])
                 )
-            result = capture_display(display_id, resize)
+            result = capture_display(display_id, resize, bool(payload.get("coordGrid")))
             result["hidden"] = []
             result["resolvedDisplayId"] = result["displayId"]
             json_output({"ok": True, "result": result})

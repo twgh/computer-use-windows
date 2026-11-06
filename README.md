@@ -1,4 +1,4 @@
-# Windows 电脑使用 Skill 0.5.4
+# Windows 电脑使用 Skill 0.5.5
 
 ## 这个项目是什么
 
@@ -81,10 +81,10 @@ CI 跑的就是同一个入口：`.github/workflows/test.yml`，`windows-latest`
 | --- | --- |
 | build / typecheck | `tsc` 编译与类型检查 |
 | skill structure | `validate_skill.py` —— SKILL.md 结构与引用完整性 |
-| version sites | 四处版本号一致（`set_version.py --check`） |
-| helper unit tests | Python helper 纯逻辑：滚轮量换算、注册表路径展开、抢焦点不抛异常、窗口聚焦三态 |
-| TS layer unit tests | `resolveGrantedApp` 的逐级解析、terminal / browser 分类 |
-| MCP stdio integration | 真实起 server 走 `initialize`、`tools/list` 与门控错误文本 |
+| version sites | 六处版本号一致（四处声明 + `package-lock.json` 两处，`set_version.py --check`） |
+| helper unit tests | Python helper 纯逻辑：滚轮量换算、注册表路径展开、抢焦点不抛异常、窗口聚焦三态、坐标网格绘制与开关透传 |
+| TS layer unit tests | `resolveGrantedApp` 逐级解析、terminal / browser 分类、坐标帧校验、`scaleCoord` 与 `scaleFactor` 解耦 |
+| MCP stdio integration | 真实起 server 走 `initialize`、`tools/list`、门控错误文本与每轮 `[COORD FRAME]` 提醒 |
 
 写测试的三条规矩：
 
@@ -200,9 +200,21 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - `resolvePrepareCapture` 的 `focusBeforeAction` 选项沿用 macOS 实现，helper 忽略它；`autoResolve` 已实现（按已授权应用窗口所在屏选显示器）。
 - `check_permissions` 在 Windows 上恒返回已授权，因此 `tcc_not_granted` 分支不会触发。
 - 控制台窗口归 `WindowsTerminal.exe` / `conhost.exe`，不是 shell 进程；宿主的父进程是 `svchost`、shell 不在其子树里，没有可靠的窗口→shell 映射可穿透（猜错就是把输入送进另一个可能已提权的 shell）。因此授权 shell 不能操作终端窗口，门控会给出专门说明；`open_application` 退化为聚焦宿主窗口，多 tab 时可见的那个未必是目标。
-- 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。
+- 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。**这些数字是运行者侧实现细节，不是给模型的换算依据**：模型只把截图图像上读到的像素原样传回，server 完成映射，每个工具结果都会用 `[COORD FRAME]` 提醒这一点。截图默认保持干净（适合 UI 开发 / 视觉审查）；需要精确定位时可设 `COMPUTER_USE_COORD_GRID=1` 叠加淡坐标网格，标签数字就是该传的图像像素坐标。
 
 ## 更新日志
+
+### 0.5.5：把坐标规则从「要记住」改成「每次都看见、算错就拒绝」
+
+长会话里最顽固的一类偏移，是模型把截图像素又乘了一遍系数：乘到物理像素是一个值、乘到逻辑点是另一个值，两者相差正好等于显示器 DPI 缩放，于是每次调用按当时「相信」的那个换算，落点来回漂。服务端 `scaleCoord` 本来就按 `displayWidth / screenshot.width` 换算过一次 —— 这是纯粹的二次换算。诱因不在算法，而在规则只出现在会话开头：`SKILL.md` 与工具描述读一次就沉底，单屏稳态下 `screenshot` 返回**零条文本**，反倒是多屏 label 里的 `WxH @150%` 和文档里的尺寸示例一直留在上下文，随时能被「重新推导」成公式；冷启动没有截图时的 `/scaleFactor` 猜测还会给出「自己算也能点动」的假反馈。本条日志刻意不写出那两个系数，理由相同。
+
+- **每轮复述。** 新增 `coordinateFrame.ts` 作为唯一文案源；MCP 统一出口给**每个工具返回**（含错误）追加独立的 `[COORD FRAME]` 文本块。用独立块而不是拼接，是为了不破坏单行 JSON 结果的解析、不改变 `content[0]`（`computer_batch` 的 `firstTextContent` 依赖它），批内子动作也不会重复。
+- **算错就拒绝。** `dispatchAction` 是所有独立动作与批内子动作的共用入口，在触碰鼠标前校验坐标帧：`pixels` 无截图锚点、坐标越过最近一张截图图像范围、百分比越界一律返回可自纠正的错误，并明确「图像边界不是换算系数」。旧的 `/scaleFactor` 冷启动退化删除。越界只拦得住落在图外的二次换算，落在图内的仍靠每轮提醒 —— 这条局限写进了文档和测试。
+- **消除诱惑数字。** 工具参数描述、`computer_batch` 的 `coordinate`（原本完全没有坐标规则）、`initialize` 指令都按坐标模式生成并明确禁止换算；多屏提示与 `switch_display` 给 `WxH @scale%` 加上「只用于认屏幕」声明；`SKILL.md` 前置「零、坐标」唯一规则、删掉尺寸示例，实现细节数字集中到运行者参考并标注不得用于换算。
+- **可选坐标网格（默认关闭）。** `windows_helper.py` 在缩放后、JPEG 编码前可叠淡网格与像素标签，标签数字就是该传的图像像素坐标，不改变图像尺寸；`zoom` 与 `normalized_0_100` 恒不画，绘制异常降级为干净截图。默认关闭是因为 UI 开发 / 视觉审查 / 截图存证需要原始像素，网格线会干扰对齐判断、也可能被误认成 UI 元素；`COMPUTER_USE_COORD_GRID=1` 按需开启。
+- **版本门禁补齐。** `set_version.py` 从四处扩到六处，纳入 `package-lock.json` 的根版本与 `packages[""].version` —— 它还停在 0.4.2，而 `--check` 此前完全看不到。
+
+实测：`python scripts/run_tests.py` 7 阶段全绿（新增 Python / TS / stdio 三层断言）；真机抓屏 1389x868 下网格开 / 关的 base64 不同且尺寸不变；`set_version.py --check` 输出 `consistent: 0.5.5`；`npm run build` 已同步 dist。
 
 ### 0.5.4：加了测试流水线，它当场抓出三个真 bug
 

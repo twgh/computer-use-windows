@@ -8,8 +8,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveGrantedApp } from "../../project/dist/vendor/computer-use-mcp/toolCalls.js";
+import { resolveGrantedApp, _test } from "../../project/dist/vendor/computer-use-mcp/toolCalls.js";
 import { getDeniedCategoryForApp } from "../../project/dist/vendor/computer-use-mcp/deniedApps.js";
+import {
+  COORD_MONITOR_DISCLAIMER,
+  coordinateReminder,
+  validateModelCoordinateFrame,
+} from "../../project/dist/vendor/computer-use-mcp/coordinateFrame.js";
+import {
+  API_RESIZE_PARAMS,
+  targetImageSize,
+} from "../../project/dist/vendor/computer-use-mcp/imageResize.js";
+import {
+  getChicagoCoordinateMode,
+  getCoordinateGridEnabled,
+} from "../../project/dist/computer-use/gates.js";
 
 const grant = (displayName, bundleId, tier = "full") => ({
   displayName,
@@ -96,4 +109,161 @@ test("console hosts categorize as terminal — tier click, never full", () => {
 test("ordinary apps are not mis-categorized", () => {
   assert.equal(getDeniedCategoryForApp(NPP.bundleId, NPP.displayName), null);
   assert.equal(getDeniedCategoryForApp(NOTEPAD.bundleId, NOTEPAD.displayName), null);
+});
+
+// ─── Coordinate frame ────────────────────────────────────────────────────
+// Regression for the "1.843 / 1.227" drift: a long-session model starts
+// multiplying image pixels by a physical-pixel or logical-point ratio, and
+// the server scales a second time. See coordinateFrame.ts.
+
+const shot = {
+  base64: "",
+  width: 1389,
+  height: 868,
+  displayWidth: 2560,
+  displayHeight: 1600,
+  originX: 0,
+  originY: 0,
+};
+const display = {
+  width: 2560,
+  height: 1600,
+  scaleFactor: 1.5,
+  originX: 100,
+  originY: 0,
+};
+const pixelsFrame = { mode: "pixels", screenshot: shot };
+
+test("the reminder restates the rule without any number the model could multiply by", () => {
+  const reminder = coordinateReminder("pixels");
+  assert.match(reminder, /^\[COORD FRAME\]/);
+  assert.match(reminder, /Never apply any conversion/);
+  assert.doesNotMatch(reminder, /Grid labels/, "opt-in overlay is not promised by default");
+  assert.doesNotMatch(reminder, /\d/, "no ratio / dimension figures in pixels-mode reminder");
+  assert.match(coordinateReminder("normalized_0_100"), /percentages/);
+  assert.match(COORD_MONITOR_DISCLAIMER, /never use them for coordinate math/);
+});
+
+test("verbatim image pixels pass the frame gate", () => {
+  assert.equal(
+    validateModelCoordinateFrame("left_click", { coordinate: [600, 400] }, pixelsFrame),
+    undefined,
+  );
+  assert.equal(
+    validateModelCoordinateFrame("wait", { duration: 1 }, pixelsFrame),
+    undefined,
+  );
+  assert.equal(
+    validateModelCoordinateFrame("zoom", { region: [0, 0, 5000, 5000] }, pixelsFrame),
+    undefined,
+    "zoom has its own region check and never changes the frame",
+  );
+});
+
+test("physical-pixel rescaling (x1.843) is rejected before any click", () => {
+  const err = validateModelCoordinateFrame(
+    "left_click",
+    { coordinate: [1000 * 1.843, 600 * 1.843] },
+    pixelsFrame,
+  );
+  assert.match(err, /\[COORD FRAME\]/);
+  assert.match(err, /outside the last screenshot image/);
+  assert.match(err, /not a conversion factor/);
+});
+
+test("a small ratio that stays inside the image is a documented blind spot", () => {
+  // The frame gate is a bound check, not a lie detector. This is exactly why
+  // [COORD FRAME] is repeated on every single tool result instead of being
+  // stated once in the skill doc.
+  assert.equal(
+    validateModelCoordinateFrame(
+      "left_click",
+      { coordinate: [600 * 1.227, 400 * 1.227] },
+      pixelsFrame,
+    ),
+    undefined,
+  );
+});
+
+test("drag start coordinate is checked too", () => {
+  assert.match(
+    validateModelCoordinateFrame(
+      "left_click_drag",
+      { coordinate: [700, 500], start_coordinate: [10, 900] },
+      pixelsFrame,
+    ),
+    /outside the last screenshot image/,
+  );
+});
+
+test("no screenshot anchor is a hard error, not a /scaleFactor guess", () => {
+  const err = validateModelCoordinateFrame(
+    "mouse_move",
+    { coordinate: [600, 400] },
+    { mode: "pixels" },
+  );
+  assert.match(err, /No screenshot anchor/);
+  assert.equal(
+    validateModelCoordinateFrame(
+      "mouse_move",
+      { coordinate: [50, 50] },
+      { mode: "normalized_0_100" },
+    ),
+    undefined,
+    "percentages need live display geometry, not a screenshot",
+  );
+  assert.match(
+    validateModelCoordinateFrame(
+      "scroll",
+      { coordinate: [120, 50] },
+      { mode: "normalized_0_100" },
+    ),
+    /outside 0-100/,
+  );
+});
+
+test("scaleCoord uses capture-time image dims and ignores scaleFactor entirely", () => {
+  const a = _test.scaleCoord(600, 400, "pixels", display, shot, {});
+  const b = _test.scaleCoord(
+    600,
+    400,
+    "pixels",
+    { ...display, scaleFactor: 2.5 },
+    shot,
+    {},
+  );
+  assert.deepEqual(a, b);
+  // Origin comes from the capture-time screenshot snapshot, NOT the fresh
+  // display geometry — that is the point of snapshotted geometry.
+  assert.deepEqual(a, {
+    x: Math.round((600 * shot.displayWidth) / shot.width) + shot.originX,
+    y: Math.round((400 * shot.displayHeight) / shot.height) + shot.originY,
+  });
+  assert.throws(
+    () => _test.scaleCoord(600, 400, "pixels", display, undefined, {}),
+    /No screenshot anchor/,
+  );
+});
+
+test("image budget produces the frame dimensions the gate validates against", () => {
+  assert.deepEqual(targetImageSize(2560, 1600, API_RESIZE_PARAMS), [1389, 868]);
+});
+
+test("coordinate grid is off by default and opt-in via env=1", () => {
+  const saved = process.env.COMPUTER_USE_COORD_GRID;
+  try {
+    delete process.env.COMPUTER_USE_COORD_GRID;
+    assert.equal(getCoordinateGridEnabled(), false);
+    process.env.COMPUTER_USE_COORD_GRID = "0";
+    assert.equal(getCoordinateGridEnabled(), false);
+    process.env.COMPUTER_USE_COORD_GRID = "1";
+    assert.equal(
+      getCoordinateGridEnabled(),
+      getChicagoCoordinateMode() === "pixels",
+      "never draw pixel labels in normalized_0_100 mode",
+    );
+  } finally {
+    if (saved === undefined) delete process.env.COMPUTER_USE_COORD_GRID;
+    else process.env.COMPUTER_USE_COORD_GRID = saved;
+  }
 });

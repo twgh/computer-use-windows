@@ -11,7 +11,7 @@ import type {
 import { targetImageSize } from '../vendor/computer-use-mcp/imageResize.js'
 import { sleep } from '../lib/sleep.js'
 import { CLI_CU_CAPABILITIES, CLI_HOST_BUNDLE_ID } from './common.js'
-import { getImageResizeParams } from './gates.js'
+import { getCoordinateGridEnabled, getImageResizeParams } from './gates.js'
 import { callPythonHelper } from './pythonBridge.js'
 
 const SCREENSHOT_JPEG_QUALITY = 0.75
@@ -146,6 +146,7 @@ export function createCliExecutor(opts: {
         targetWidth: targetW,
         targetHeight: targetH,
         jpegQuality: SCREENSHOT_JPEG_QUALITY,
+        coordGrid: getCoordinateGridEnabled(),
       })
       return {
         ...result,
@@ -162,6 +163,7 @@ export function createCliExecutor(opts: {
         targetWidth: targetW,
         targetHeight: targetH,
         jpegQuality: SCREENSHOT_JPEG_QUALITY,
+        coordGrid: getCoordinateGridEnabled(),
       })
       return result
     },
