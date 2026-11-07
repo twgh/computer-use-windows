@@ -56,26 +56,6 @@ tags:
 > - `pixels` 模式下没有先 `screenshot` 就发带坐标的动作会被直接拒绝；坐标超出最近一张截图图像范围也会被拒绝并说明原因。
 > - 显示器名称里的分辨率 / 缩放数字只用来认屏幕，绝不用来算坐标。
 
-## 本 skill 提供什么
-
-一套完整的 Windows 桌面控制能力，以本地 MCP server 的形式暴露给 agent：截图、鼠标、键盘、应用 / 窗口 / 显示器映射、剪贴板。
-
-- **仅支持 Windows**（`platform: win32`，后端是 Windows 专属实现）。
-- **自带独立 runtime**：只使用公开依赖 `Node.js + Python + mss + Pillow + pyautogui + psutil + pywin32`，不依赖任何 agent 客户端的本机二进制、`.node` 模块或提取的应用资产。
-- **可自举**：首次真正调用工具时自动创建 `project/.runtime/venv` 并安装 Python 依赖。
-- **客户端无关**：MCP over stdio，任意支持 MCP 的 agent 客户端都能接。
-
-## 何时使用
-
-- 需要看到 Windows 桌面内容（整屏截图、局部放大查看小字）
-- 需要模拟用户操作（点击、双击、右键、拖拽、滚动、长按、施加修饰键）
-- 需要输入文字（含中文等 Unicode）或按快捷键
-- 需要启动应用、切换前台窗口
-- 需要读写剪贴板
-- 需要跨多显示器、混合缩放的屏幕操作
-
-不适用：Linux / macOS 桌面；需要向管理员权限窗口注入输入且 runtime 未提权的场景（见「平台限制」）。
-
 ## 一、准备 runtime
 
 自带项目位于 `./project`（相对 skill 安装目录，即本文件所在目录）。下文所有路径均相对 skill 根目录。
