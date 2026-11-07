@@ -4,13 +4,9 @@
 
 ## 一、构建与启动
 
-### 在仓库源码树里执行 `npm run build` 失败
+### 分发包不需要构建，也无法构建
 
-正常安装与升级都不需要构建：分发包自带 `project/dist/cli.js`，它是自包含的单文件 bundle，不依赖 `node_modules`，也不含 `src/`、`tsconfig.json`、`package-lock.json`，所以安装目录里无法构建、也不需要构建。只有拿到仓库源码树才需要构建。
-
-- 确认 Node.js >= 20（`node -v`）。
-- 先 `npm install` 生成 `node_modules`；`npm run build` 会先跑 tsc 再跑 esbuild 覆盖 `dist/cli.js`。
-- 类型检查可单独跑：`cd ./project && npm run check`。
+正常安装与升级都不需要构建：分发包自带 `project/dist/cli.js`，它是自包含的单文件 bundle，不依赖 `node_modules`，也不含 `src/`、`tsconfig.json`、`package-lock.json`，所以安装目录里无法构建、也不需要构建。要改代码请到仓库源码树，构建步骤见仓库的 `README.md`。
 
 ### server 启动了但"没有任何输出"
 
@@ -42,8 +38,6 @@ server 已启动却返回空工具列表时：
 - 确认客户端**重建过 server 进程**：在 MCP 页面把该 server 关掉再打开（或点「重新连接」）；找不到入口就重启客户端。新入口只在进程启动时加载，旧进程不会热更新。
 - 确认 `args[0]` 指向本次升级后的那个 skill 目录下的 `dist/cli.js`，没有指向另一份旧副本。
 - `src/`、`dist/` 下其它文件、`node_modules/`、`.runtime/` 都是机器本地状态，升级不会清理也不会更新；bundle 不引用它们，无需手工处理，也不要拿残留的旧源码重新构建。
-
-> 维护者：改过版本号后没重新 `npm run build`，`package_skill.py` 会拒绝出包；本地构建出的 `dist/cli.js` 不会自动带上新版本。
 
 ### 改了环境变量没有生效
 
@@ -159,10 +153,7 @@ server 已启动却返回空工具列表时：
 
 - 重建 Python 环境：删除 `project/.runtime/venv` 与 `project/.runtime/requirements.sha256`。
 - 释放卡住的会话锁：删除 `%USERPROFILE%\.computer-use-windows\computer-use.lock`（确认无活动会话后再删）。
-- 从源码重新构建（正常安装 / 升级不需要）：`cd ./project && npm install && npm run build`。
 - 清理 `save_to_disk` 产生的图：删除 `%TEMP%\computer-use-windows\` 整个目录即可，其中没有任何状态。
-- 校验 skill 结构：`python ./scripts/validate_skill.py .`（UTF-8 安全，不依赖第三方库；检查 frontmatter、命名规范与 `references/` 引用是否都存在）。
-- 打包分发：从仓库根运行 `python scripts/package_skill.py -o <zip>`；产物 `project/` 下只有 `package.json`、`dist/cli.js`、`runtime/windows_helper.py`、`runtime/requirements.txt`，不含 TypeScript 源码、`tsconfig.json`、`package-lock.json`、`node_modules/`、`.runtime/`、`README.md`、`LICENSE`、`scripts/`。安装方开箱即用；维护者发版前必须先 `npm run build`，否则打包脚本会因入口缺失 / 版本陈旧拒绝出包。
 
 ## 八、排查时的硬性约束
 
