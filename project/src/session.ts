@@ -105,7 +105,7 @@ export function createSessionContext(): ComputerUseSessionContext {
           // fires when this session is truly dormant, not merely between
           // tool calls.
           await touchComputerUseLock()
-          return { holder: process.env.CODEX_THREAD_ID ?? `pid-${process.pid}`, isSelf: true }
+          return { holder: process.env.AGENT_SESSION_ID ?? `pid-${process.pid}`, isSelf: true }
         case 'blocked':
           return { holder: result.by, isSelf: false }
       }

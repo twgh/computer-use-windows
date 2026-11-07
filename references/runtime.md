@@ -95,7 +95,7 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 
 | 变量 | 作用 |
 | --- | --- |
-| `CODEX_THREAD_ID` | 会话身份 ID，用于判定"锁是否由自己持有"；缺失时退化为 `pid-<pid>` |
+| `AGENT_SESSION_ID` | 会话身份 ID，用于判定"锁是否由自己持有"；缺失时退化为 `pid-<pid>` |
 | `PYTHONDONTWRITEBYTECODE` / `PYAUTOGUI_HIDE_SUPPORT_PROMPT` | Python 侧噪声抑制，helper 内 `setdefault` 为 `1` |
 
 ### 会话锁

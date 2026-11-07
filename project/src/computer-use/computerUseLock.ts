@@ -70,7 +70,7 @@ export type CheckResult =
   | { kind: 'blocked'; by: string }
 
 function getSessionId(): string {
-  return process.env.CODEX_THREAD_ID ?? `pid-${process.pid}`
+  return process.env.AGENT_SESSION_ID ?? `pid-${process.pid}`
 }
 
 function getLockPath(): string {
