@@ -1,4 +1,4 @@
-# Windows 电脑使用 Skill 0.6.0
+# Windows 电脑使用 Skill 0.7.0
 
 ## 这个项目是什么
 
@@ -212,6 +212,13 @@ Windows 不像 macOS 那样需要 Accessibility / Screen Recording 授权弹窗�
 - 截图分辨率由消费方模型的输入预算决定（长边 1568px，且 `ceil(w/28)×ceil(h/28) ≤ 1568`）。2560x1600 的屏实际得到 1389x868，因此小字号文本要配合 `zoom` 阅读。可用 `COMPUTER_USE_IMAGE_MAX_PX` / `COMPUTER_USE_IMAGE_MAX_TOKENS` 调整，但请先读 [0.4.0：图像预算可配置](#0.4.0：图像预算可配置) 一节的前提说明。**这些数字是运行者侧实现细节，不是给模型的换算依据**：模型只把截图图像上读到的像素原样传回，server 完成映射，每个工具结果都会用 `[COORD FRAME]` 提醒这一点。截图默认保持干净（适合 UI 开发 / 视觉审查）；需要精确定位时可设 `COMPUTER_USE_COORD_GRID=1` 叠加淡坐标网格，标签数字就是该传的图像像素坐标。
 
 ## 更新日志
+
+### 0.7.0：预编译入口随包分发，runtime 分层重构，会话锁身份改用 AGENT_SESSION_ID
+
+- **入口 bundle 随包分发。** 分发 zip 内置 `project/dist/cli.js`（内联 MCP SDK 的自包含 esbuild 产物），自动升级只覆盖包内文件也能换到新代码，修复「升级后仍跑旧编译产物」的问题；同步补齐各客户端 MCP 接入说明。
+- **抽出传输无关 runtime，MCP 层降为薄传输层**；`zoom` 修复非主屏漏加显示器 origin。
+- **会话锁身份改用 `AGENT_SESSION_ID`**（原为特定客户端命名），缺失时仍退化为 `pid-<pid>`。
+- **打包脚本改用顶层白名单**，`.github/` 等开发期文件不再进 zip；文档拆出 `ARCHITECTURE.md`，新增 Workbuddy 客户端接入 MCP 的重启与启用步骤。
 
 ### 0.6.0：版本号改为 x.y.0，硬规则写进 AGENTS.md
 
