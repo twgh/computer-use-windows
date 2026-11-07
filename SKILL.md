@@ -193,11 +193,8 @@ Python 侧无需手动准备，首次调用工具时自动自举。
 
 ## 八、临时文件与硬性规则
 
-- 仅将本机视为可信本地环境。
 - 严禁在 skill 或 project 目录内创建临时文件（截图、解码图片、JSON dump、测试输出、日志）。需要写盘时一律写入系统临时目录（Windows：`%TEMP%`，即 `C:\Users\<用户>\AppData\Local\Temp`）。`project/.runtime/` 下只允许存在自举 venv 及其锁 / 配置数据（`venv/`、`requirements.sha256`）。任务结束后清理自己产生的临时文件。
 - 截图默认通过 MCP image content 直接返回，**无需落盘**。需要把图交给用户看时，给 `screenshot` / `zoom` 传 `save_to_disk: true`：运行时会写入 `%TEMP%\computer-use-windows\`，并在结果文本里给出绝对路径。这些图是临时产物，用完请清理。
-- 不要让用户去任何 agent 客户端的本地安装目录里寻找二进制或隐藏资产 —— 本 runtime 是独立的，只用公开依赖。
-- 说明当前 runtime 上报 `screenshotFiltering: none`，动作门控在 MCP 层处理。
 
 ## 九、参考文件
 
