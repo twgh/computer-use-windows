@@ -23,6 +23,7 @@ import {
   getChicagoCoordinateMode,
   getCoordinateGridEnabled,
 } from "../../project/dist/computer-use/gates.js";
+import { finalizeToolResult } from "../../project/dist/runtime.js";
 
 const grant = (displayName, bundleId, tier = "full") => ({
   displayName,
@@ -297,5 +298,36 @@ test("coordinate grid is off by default and opt-in via env=1", () => {
   } finally {
     if (saved === undefined) delete process.env.COMPUTER_USE_COORD_GRID;
     else process.env.COMPUTER_USE_COORD_GRID = saved;
+  }
+});
+
+// ─── Transport-agnostic runtime ──────────────────────────────────────────
+// A host that does not speak MCP calls `runtime.invoke()` directly. Two ways
+// that goes silently wrong: the screenshot blob (tens of megabytes of base64)
+// reaches the host's log or context, or the [COORD FRAME] note is forgotten and
+// a long session starts rescaling coordinates.
+
+const rawWithBlob = {
+  content: [{ type: "text", text: '{"ok":true}' }],
+  isError: false,
+  screenshot: { ...shot, base64: "A".repeat(1024) },
+  telemetry: { error_kind: "bad_args" },
+};
+
+test("runtime.invoke strips the screenshot blob but keeps the payload and telemetry", () => {
+  const reply = finalizeToolResult(rawWithBlob, "pixels");
+  assert.equal(reply.content[0].text, '{"ok":true}', "content[0] must stay untouched");
+  assert.equal("screenshot" in reply, false, "the base64 blob must not reach a non-MCP host");
+  assert.equal(reply.telemetry?.error_kind, "bad_args");
+});
+
+test("runtime.invoke appends the same note the MCP transport appends", () => {
+  // Two implementations exist by necessity (the vendor layer cannot import its
+  // host). This pins them to one string so a future edit cannot make the
+  // non-MCP entry point drift into a different coordinate story.
+  for (const mode of ["pixels", "normalized_0_100"]) {
+    const reply = finalizeToolResult(rawWithBlob, mode);
+    assert.equal(reply.content.at(-1).type, "text");
+    assert.equal(reply.content.at(-1).text, coordinateReminder(mode));
   }
 });

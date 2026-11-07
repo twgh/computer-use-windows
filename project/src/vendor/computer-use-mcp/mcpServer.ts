@@ -113,6 +113,21 @@ function mergePermissionResponse(
 }
 
 /**
+ * A bound dispatcher returned by `bindSessionContext`.
+ *
+ * Hosts that build one themselves (the CLI host builds it in `runtime.ts`, so
+ * non-MCP callers share the same state) pass it to
+ * `createComputerUseMcpServer` instead of a `context`. Binding twice would give
+ * the process two independent last-screenshot cells: whichever entry point took
+ * the screenshot would be the only one whose coordinate frame is valid, and the
+ * other would answer "outside the last screenshot image" to every click.
+ */
+export type ToolDispatch = (
+  name: string,
+  args: unknown,
+) => Promise<CuCallToolResult>;
+
+/**
  * Bind session state to a reusable dispatcher. The returned function is the
  * wrapper closure: async lock gate → build overrides fresh → `handleToolCall`
  * → stash screenshot → strip piggybacked fields.
@@ -300,6 +315,12 @@ export function createComputerUseMcpServer(
   coordinateMode: CoordinateMode,
   context?: ComputerUseSessionContext,
   tools?: Tool[],
+  /**
+   * An already-bound dispatcher. Preferred over `context`: the CLI host binds
+   * once in `runtime.ts` so its non-MCP callers share one last-screenshot cell
+   * with the MCP transport. `context` is then unused and may be omitted.
+   */
+  dispatch?: ToolDispatch,
 ): Server {
   const { serverName, logger } = adapter;
 
@@ -330,12 +351,13 @@ export function createComputerUseMcpServer(
     adapter.isDisabled() ? { tools: [] } : { tools: toolList },
   );
 
-  if (context) {
-    const dispatch = bindSessionContext(adapter, coordinateMode, context);
+  const call =
+    dispatch ?? (context ? bindSessionContext(adapter, coordinateMode, context) : undefined);
+  if (call) {
     server.setRequestHandler(
       CallToolRequestSchema,
       async (request): Promise<CallToolResult> => {
-        const { screenshot: _s, telemetry: _t, ...result } = await dispatch(
+        const { screenshot: _s, telemetry: _t, ...result } = await call(
           request.params.name,
           request.params.arguments ?? {},
         );

@@ -11,7 +11,8 @@ references/              # 本目录，按需加载的深度参考
 project/
   src/
     cli.ts               # 入口：runServer()，异常写 stderr 后 exit(1)
-    server.ts            # 组装 adapter / 工具清单，连接 stdio transport
+    runtime.ts           # 传输无关门面：唯一 dispatcher、工具清单、invoke() / invokeRaw()
+    server.ts            # 只做 MCP 接线：把 runtime 的 dispatcher 交给 server 工厂
     session.ts           # 会话状态与锁回调
     computer-use/        # Windows 适配层（executor / gates / pythonBridge / imageSave / 锁 / 应用名过滤）
     vendor/computer-use-mcp/  # 平台无关的 MCP 工具与门控框架
@@ -136,14 +137,16 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 
 ## 启动流程
 
-`project/src/cli.ts` → `runServer()`（`project/src/server.ts`）：
+`project/src/cli.ts` → `runServer()` → `createComputerUseRuntime()`（`project/src/runtime.ts`）：
 
 1. 构造 host adapter（缓存单例），组装 session 上下文与子门控。
 2. 读取坐标模式。
-3. 创建 MCP server（`createComputerUseMcpServer`），注册 `tools/call` 处理。
-4. 尝试 `listInstalledApps()` 并把可用应用名拼进 `request_access` 的描述文本；失败则退回通用文案。
-5. `buildComputerUseTools(...)` 构建工具清单，并注册 `tools/list`：禁用时返回 `{tools: []}`。
-6. 连接 `StdioServerTransport`，等待客户端请求。
+3. 尝试 `listInstalledApps()` 并把可用应用名拼进 `request_access` 的描述文本；失败则退回通用文案。
+4. `buildComputerUseTools(...)` 构建工具清单。
+5. `bindSessionContext(...)` 绑定**唯一**的 dispatcher —— 最近一张截图的锚点就存在它的闭包里。
+6. `server.ts` 把 `runtime.invokeRaw` 交给 `createComputerUseMcpServer`：注册 `tools/call`（结果末尾追加 `[COORD FRAME]`）与 `tools/list`（禁用时返回 `{tools: []}`），再连接 `StdioServerTransport`。
+
+`runtime.invoke(name, args)` 是给不走 MCP 的宿主的入口：剥掉截图 blob、追加同一条 `[COORD FRAME]`。两条入口共用同一个 dispatcher，坐标锚点因此不会分叉；反过来，任何新增入口都必须复用 `runtime`，不要自己再 `bindSessionContext` 一次。
 
 没有命令行参数解析；唯一的输入通道是 stdio 的 MCP 消息。
 
@@ -225,10 +228,11 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 - `pixels`：`x = round(rawX * lastScreenshot.displayWidth / lastScreenshot.width) + lastScreenshot.originX`。比例用的是**截图尺寸**（含长边降采样），不是 `1/scaleFactor`；显示器几何取的是**截图时刻**的快照。
 - 无上一张截图：`dispatchAction` 的坐标帧校验直接拒绝（`bad_args`）；`scaleCoord` 内也不再有 `rawX / display.scaleFactor` 退化，缺锚点时抛错而不是猜一个落点。这个退化以前会给出"看起来点得动"的假反馈，反过来强化模型自己做 DPI 换算的习惯。
 
-坐标帧校验在 `coordinateFrame.ts`：检查无锚点、图像越界（错误文本明确"边界不是换算系数"）与百分比越界；每个工具结果末尾还会由 `mcpServer.ts` 追加一条 `[COORD FRAME]` 文本块，重复"原样传图上的像素、禁止任何换算"的规则。消费坐标的工具：五种点击、`scroll`、`left_click_drag`（起点与终点）、`mouse_move`。`zoom` 的 `region` 单独用同一比例换算，且不改变坐标系。
+坐标帧校验在 `coordinateFrame.ts`：检查无锚点、图像越界（错误文本明确"边界不是换算系数"）与百分比越界；每个工具结果末尾还会追加一条 `[COORD FRAME]` 文本块，重复"原样传图上的像素、禁止任何换算"的规则 —— MCP 入口在 `mcpServer.ts`，非 MCP 入口在 `runtime.ts` 的 `finalizeToolResult`，两处必须产出同一字符串（单测里有断言钉住）。消费坐标的工具：五种点击、`scroll`、`left_click_drag`（起点与终点）、`mouse_move`。`zoom` 的 `region` 单独用同一比例换算，且不改变坐标系。
 
 ## 分层说明
 
+- `project/src/runtime.ts` 是**传输无关**的装配层：adapter / 会话状态 / 坐标模式 / 工具清单 / 唯一 dispatcher 在这里绑一次，MCP 只是它上面的一层薄传输。新增入口（本地 IPC、进程内调用）必须复用它，不要二次 `bindSessionContext` —— 二次绑定会得到第二个截图锚点单元，两个入口的坐标系会互相判为"越界"。
 - `project/src/vendor/computer-use-mcp/` 是**平台无关**的工具 / 门控框架，本身不做任何桌面操作，全部通过注入的 executor 与 host adapter 完成。坐标换算、图像缩放、像素比对、按键黑名单都在这一层。
 - `project/src/computer-use/` 是 **Windows 适配层**：`executor.ts` 用 Python bridge 实现 `ComputerExecutor`；`gates.ts` 从环境变量读门控；`session.ts` 维护会话状态；`pythonBridge.ts` 负责自举与调用；`imageSave.ts` 实现 `save_to_disk` 落盘；`computerUseLock.ts` 管会话锁。
 - DPI：Python 进程在 import 任何 GUI 库**之前**设置 Per-Monitor v2 DPI awareness（失败时回退 shcore level 2 / `SetProcessDPIAware`）。这一步必须在 import 前完成，否则 pyautogui 的初始化会抢先锁定 DPI 模式，导致混合缩放屏上截图与点击坐标不一致。
