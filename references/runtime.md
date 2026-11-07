@@ -1,48 +1,23 @@
 # Runtime 参考
 
-本文件描述 `computer-use-windows` 的运行机制：目录结构、环境变量、自举链路、Python helper 协议与内部分层。文中出现的 `project/src/...` 是**仓库源码路径**，只用于说明实现位置；分发包不含源码，运行时只有编译后的 `project/dist/cli.js`。
+本文件描述 `computer-use-windows` 的运行机制：目录结构、环境变量、自举链路、Python helper 协议与运行时分层。文中出现的路径都是**分发包内真实存在**的文件；源码只在仓库里，不随包分发。
 
-## 目录结构（仓库源码树）
+## 目录结构
 
-```text
-SKILL.md                 # 技能入口（agent 先读这个）
-README.md                # 面向人的项目说明
-references/              # 本目录，按需加载的深度参考
-project/
-  src/
-    cli.ts               # 入口：runServer()，异常写 stderr 后 exit(1)
-    runtime.ts           # 传输无关门面：唯一 dispatcher、工具清单、invoke() / invokeRaw()
-    server.ts            # 只做 MCP 接线：把 runtime 的 dispatcher 交给 server 工厂
-    session.ts           # 会话状态与锁回调
-    computer-use/        # Windows 适配层（executor / gates / pythonBridge / imageSave / 锁 / 应用名过滤）
-    vendor/computer-use-mcp/  # 平台无关的 MCP 工具与门控框架
-  runtime/
-    windows_helper.py    # Python 桌面后端（单文件，命令式）
-    requirements.txt     # Python 依赖清单
-  package.json           # bin: computer-use-windows -> dist/cli.js
-  tsconfig.json
-  scripts/bundle.mjs     # esbuild：把 SDK 内联成自包含单文件入口
-  dist/cli.js            # 随 zip 分发的 bundle；自动升级时由包覆盖
-  dist/ 其余文件         # tsc 单测产物，仅开发期生成，不打进 zip
-  .runtime/              # 机器本地状态（不打进 zip，运行时自动生成）
-scripts/
-  package_skill.py       # 打包脚本
-```
-
-分发包是运行时副本，实际只带以下文件（`project/` 下由 `package_skill.py` 的 `PROJECT_RUNTIME_ENTRIES` 精确控制）：
+分发包是运行时副本，只带以下文件：
 
 ```text
-SKILL.md
-references/tools.md
-references/runtime.md
-references/troubleshooting.md
+SKILL.md                           # 技能入口（agent 先读这个）
+references/tools.md                # 25 个工具的完整参数与返回结构
+references/runtime.md              # 本文件
+references/troubleshooting.md      # 常见故障的定位与处置
 project/package.json               # "type": "module" + 项目根锚点
 project/dist/cli.js                # 自包含 bundle，升级时由包覆盖
-project/runtime/windows_helper.py  # Python 桌面后端
+project/runtime/windows_helper.py  # Python 桌面后端（单文件，命令式）
 project/runtime/requirements.txt   # venv 自举的依赖指纹
 ```
 
-`src/`、`tsconfig.json`、`package-lock.json`、构建脚本、`node_modules/`、`.runtime/` 与 `dist/` 下其它 tsc 产物都不进包：bundle 自包含，源码没有运行时作用。
+源码、构建配置、`node_modules/`、`.runtime/` 与 `dist/` 下其它产物都不进包：bundle 自包含，源码没有运行时作用。
 
 ### 数据落点
 
@@ -67,7 +42,7 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 
 **环境变量的生效边界**：所有变量都在 **server 进程启动时**从 MCP 配置的 `env` 注入，之后成为该进程 `process.env` 的副本。下文说的「每次调用 / 每次截图重新读取」，只是说代码没有把值缓存成模块常量，读的仍是这份副本 —— 运行中的进程看不到外部对配置或系统环境变量的修改。因此**改任何配置都要重启 server 进程**；常用做法是在 MCP 页面把该 server 关掉再打开（或点「重新连接」）；找不到 MCP 页面入口时重启客户端效果相同，两者都会新建进程（详见 `references/troubleshooting.md`「改了环境变量没有生效」）。只有进程内直接改 `process.env` 才可能免重启，普通用法做不到。
 
-`COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 还在**模块加载时求值一次**（`project/src/computer-use/gates.ts`），是真正的常量；其余开关至少在进程内是每次读取的，但对使用者而言同样需要重启。
+`COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 还在**进程启动加载配置时求值一次**，是真正的常量；其余开关至少在进程内是每次读取的，但对使用者而言同样需要重启。
 
 坐标模式必须与工具描述保持一致：描述文案在构建工具清单时按同一常量固化，两者不一致会导致点击落点错误。
 
@@ -98,7 +73,7 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 
 2560x1600 的屏按原尺寸送是 92×58 = 5336 tokens（预算的 3.4 倍），于是被缩到 1389x868（50×31 = 1550）—— 这也是每张截图的代价被钉在约 1550 tokens、与屏幕大小无关的原因。
 
-**默认值不是本 runtime 的偏好，而是移植自消费方模型自己的图像转码器**（`imageResize.ts` 开头）。预先缩到这两个数，才能保证 `ScreenshotResult.width/height` 等于模型真正看到的那张图的尺寸，`scaleCoord` 的比例才成立。
+**默认值不是本 runtime 的偏好，而是移植自消费方模型自己的图像转码器**。预先缩到这两个数，才能保证 `ScreenshotResult.width/height` 等于模型真正看到的那张图的尺寸，`scaleCoord` 的比例才成立。
 
 调高预算的前提是**下游模型确实接受更大的图**（本地 VLM，或 tiling 参数不同的服务）。发出超过消费方上限的图会在到达时被重新缩放，模型随后按更大的图读数取坐标，而我们报告的尺寸更小 —— 每次点击都会按错误比例偏移（1568 与 1389 之比约 13%）。因此：
 
@@ -108,7 +83,7 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 
 两个变量每次截图前重新读取；但 env 值来自进程启动时，改配置后仍需重启 server。
 
-> 本节的数字（预算、缩放后的尺寸、比例）**只服务于运行者与排障**，不是给模型用的换算依据。模型侧拿到的规则是"截图图像像素原样传回"，server 与 `coordinateFrame.ts` 会在每个工具结果里重复它；模型若拿本节的比例自行乘坐标，会被二次换算。
+> 本节的数字（预算、缩放后的尺寸、比例）**只服务于运行者与排障**，不是给模型用的换算依据。模型侧拿到的规则是"截图图像像素原样传回"，server 会在每个工具结果里重复它；模型若拿本节的比例自行乘坐标，会被二次换算。
 
 ### 坐标网格
 
@@ -125,7 +100,7 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 
 ### 会话锁
 
-桌面同一时刻只允许一个会话操作，实现在 `project/src/computer-use/computerUseLock.ts`。生命周期：
+桌面同一时刻只允许一个会话操作。生命周期：
 
 1. **获取**：首个非 defer 工具（`request_access` / `list_granted_applications` / `release_lock` 只检查不获取）通过门控时 `O_EXCL` 独占创建锁文件。
 2. **心跳**：本会话每次经过锁门控（含 defer 工具）都刷新 `lastHeartbeat`（`touchComputerUseLock`，尽力而为，失败只让锁更早可被接管）。
@@ -137,22 +112,22 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 
 ## 启动流程
 
-`project/src/cli.ts` → `runServer()` → `createComputerUseRuntime()`（`project/src/runtime.ts`）：
+进程启动后按固定顺序完成接线：
 
-1. 构造 host adapter（缓存单例），组装 session 上下文与子门控。
+1. 构造 host adapter（缓存单例），组装会话状态与子门控。
 2. 读取坐标模式。
-3. 尝试 `listInstalledApps()` 并把可用应用名拼进 `request_access` 的描述文本；失败则退回通用文案。
-4. `buildComputerUseTools(...)` 构建工具清单。
-5. `bindSessionContext(...)` 绑定**唯一**的 dispatcher —— 最近一张截图的锚点就存在它的闭包里。
-6. `server.ts` 把 `runtime.invokeRaw` 交给 `createComputerUseMcpServer`：注册 `tools/call`（结果末尾追加 `[COORD FRAME]`）与 `tools/list`（禁用时返回 `{tools: []}`），再连接 `StdioServerTransport`。
+3. 枚举本机已安装应用，把可用名称拼进 `request_access` 的描述文本；失败则退回通用文案。
+4. 构建工具清单；禁用时 `tools/list` 返回空数组。
+5. 绑定**唯一**的传输无关 dispatcher —— 最近一张截图的坐标锚点就存在它的闭包里。
+6. 在它之上挂 stdio 的 MCP 传输，注册 `tools/call`（结果末尾追加 `[COORD FRAME]`）与 `tools/list`。
 
-`runtime.invoke(name, args)` 是给不走 MCP 的宿主的入口：剥掉截图 blob、追加同一条 `[COORD FRAME]`。两条入口共用同一个 dispatcher，坐标锚点因此不会分叉；反过来，任何新增入口都必须复用 `runtime`，不要自己再 `bindSessionContext` 一次。
+除 MCP 之外还有一条进程内入口：复用同一个 dispatcher，只做「剥掉截图 blob + 追加同一条 `[COORD FRAME]`」。两条入口共享坐标锚点，因此不会分叉；任何新增入口都必须复用这个 dispatcher，不能重新绑定一次 —— 二次绑定等于第二个锚点单元，两个入口的坐标会互相判为越界。
 
 没有命令行参数解析；唯一的输入通道是 stdio 的 MCP 消息。
 
 ## venv 自举
 
-实现在 `project/src/computer-use/pythonBridge.ts`，由 `bootstrapPromise` 单例保护，失败后清空以允许重试。
+由进程内的单例保护，失败后清空以允许重试。
 
 1. 计算路径：`venv = project/.runtime/venv`，helper 为 `project/runtime/windows_helper.py`。
 2. 若 venv 可执行文件不存在：先试 `py -3 -m venv`，失败回退 `python -m venv`。
@@ -222,20 +197,13 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 
 ## 坐标换算
 
-`scaleCoord`（`project/src/vendor/computer-use-mcp/toolCalls.ts`）是唯一的坐标入口：
+`scaleCoord` 是唯一的坐标入口：
 
 - `normalized_0_100`：`x = round(rawX / 100 * display.width) + display.originX`。
 - `pixels`：`x = round(rawX * lastScreenshot.displayWidth / lastScreenshot.width) + lastScreenshot.originX`。比例用的是**截图尺寸**（含长边降采样），不是 `1/scaleFactor`；显示器几何取的是**截图时刻**的快照。
 - 无上一张截图：`dispatchAction` 的坐标帧校验直接拒绝（`bad_args`）；`scaleCoord` 内也不再有 `rawX / display.scaleFactor` 退化，缺锚点时抛错而不是猜一个落点。这个退化以前会给出"看起来点得动"的假反馈，反过来强化模型自己做 DPI 换算的习惯。
 
-坐标帧校验在 `coordinateFrame.ts`：检查无锚点、图像越界（错误文本明确"边界不是换算系数"）与百分比越界；每个工具结果末尾还会追加一条 `[COORD FRAME]` 文本块，重复"原样传图上的像素、禁止任何换算"的规则 —— MCP 入口在 `mcpServer.ts`，非 MCP 入口在 `runtime.ts` 的 `finalizeToolResult`，两处必须产出同一字符串（单测里有断言钉住）。消费坐标的工具：五种点击、`scroll`、`left_click_drag`（起点与终点）、`mouse_move`。`zoom` 的 `region` 单独用同一比例换算，且不改变坐标系。
-
-## 分层说明
-
-- `project/src/runtime.ts` 是**传输无关**的装配层：adapter / 会话状态 / 坐标模式 / 工具清单 / 唯一 dispatcher 在这里绑一次，MCP 只是它上面的一层薄传输。新增入口（本地 IPC、进程内调用）必须复用它，不要二次 `bindSessionContext` —— 二次绑定会得到第二个截图锚点单元，两个入口的坐标系会互相判为"越界"。
-- `project/src/vendor/computer-use-mcp/` 是**平台无关**的工具 / 门控框架，本身不做任何桌面操作，全部通过注入的 executor 与 host adapter 完成。坐标换算、图像缩放、像素比对、按键黑名单都在这一层。
-- `project/src/computer-use/` 是 **Windows 适配层**：`executor.ts` 用 Python bridge 实现 `ComputerExecutor`；`gates.ts` 从环境变量读门控；`session.ts` 维护会话状态；`pythonBridge.ts` 负责自举与调用；`imageSave.ts` 实现 `save_to_disk` 落盘；`computerUseLock.ts` 管会话锁。
-- DPI：Python 进程在 import 任何 GUI 库**之前**设置 Per-Monitor v2 DPI awareness（失败时回退 shcore level 2 / `SetProcessDPIAware`）。这一步必须在 import 前完成，否则 pyautogui 的初始化会抢先锁定 DPI 模式，导致混合缩放屏上截图与点击坐标不一致。
+坐标帧校验：检查无锚点、图像越界（错误文本明确"边界不是换算系数"）与百分比越界；每个工具结果末尾还会追加一条 `[COORD FRAME]` 文本块，重复"原样传图上的像素、禁止任何换算"的规则。MCP 入口与进程内入口各有一处产出点，两者必须给出同一字符串（单测里有断言钉住）。消费坐标的工具：五种点击、`scroll`、`left_click_drag`（起点与终点）、`mouse_move`。`zoom` 的 `region` 单独用同一比例换算，且不改变坐标系。
 
 ## Windows 适配要点
 
@@ -257,7 +225,7 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 - **`open_app` 返回 `focused` / `present` / `launched`，且 `present` 绝不启动。** 应用在运行但窗口提不起来时（后台进程抢焦点被 Windows 拒绝），旧实现照样 `os.startfile` 一遍 —— 于是"打不开"变成"多开一个"。现在 `focus_existing_window` 返回三态，`present` 直接回给工具层报 `state_conflict`。vendor 侧 `openApp` 的签名相应变成 `Promise<OpenAppOutcome | void>`，返回 `void` 的 host（macOS）会拿到一句明确"无法确认已置前"的中性文本，而不是冒领成功。
 - **`conhost.exe` 也要归 terminal 档。** 它的显示名是「Console Window Host」，不含 "terminal" 子串，落到默认分类就是 **full 档 = 完整键盘进 shell**。`TERMINAL_NAME_SUBSTRINGS` 里补了 `conhost` 与 `console window host`；刻意没加裸词 "console"，`.includes()` 下太容易误伤。
 - **窗口归属只穿透 `ApplicationFrameWindow`，不穿透终端宿主。** Win11 24H2 起控制台由 Windows Terminal 承载，`GetWindowThreadProcessId` 拿到的是宿主；实测宿主的父进程是 `svchost`（默认终端交接），shell 不在它的子树里 —— 没有可靠的窗口→shell 映射，猜错就是把输入送进另一个可能已提权的 shell。所以 `resolve_window_pid` 只管 Store 应用那一侧，控制台侧改由 `consoleHostNote()` 在前台门控与落点校验处给出专门说明（授权宿主 = terminal 档，或改用自己的 shell 工具），替代原来那句对控制台场景纯属误导的「it may have appeared since your last one」。上面那条聚焦兜底用的正是同一个宿主判定。
-- **候选清单 = 注册表安装项 ∪ 有可见窗口的进程**（`list_window_apps`，`source/computer-use/windowApps.ts`）。注册表给不出 Store 应用的可读名称（计算器在 `WindowsApps` 下，既无 Uninstall 条目也无 App Paths 条目），而可见窗口是「用户能指认的应用」的最强信号。窗口来源的条目带 `origin: 'window'`：跳过安装路径白名单（便携应用可能在 `D:\appsd\` 这类任意目录），但仍要过名称黑名单。
+- **候选清单 = 注册表安装项 ∪ 有可见窗口的进程**（`list_window_apps`）。注册表给不出 Store 应用的可读名称（计算器在 `WindowsApps` 下，既无 Uninstall 条目也无 App Paths 条目），而可见窗口是「用户能指认的应用」的最强信号。窗口来源的条目带 `origin: 'window'`：跳过安装路径白名单（便携应用可能在 `D:\appsd\` 这类任意目录），但仍要过名称黑名单。
 - **显示名优先取 exe 版本资源**（`file_description`，按路径缓存）。只作用于 App Paths 分支与 `display_name_from_path`，不覆盖 Uninstall 的 `DisplayName` —— 后者已是本地化用户可见名，覆盖后反而变差。
-- **`computer-use/appNames.ts` 的路径规则**：Program Files / AppData / Steam 白名单，System32 / Winsxs / Installer 黑名单，外加注册表与 Windows 组件噪声名称黑名单。Windows 的 `bundleId` 是规范化后的可执行文件路径，不是 bundle id，因此「始终保留」名单按显示名匹配。
-- **分层的取舍**：写盘（`save_to_disk`）由 host 注入回调实现，vendor 层不直接依赖 `node:fs`，与 `cropRawPatch` 的注入方式一致。
+- **候选清单的路径规则**：Program Files / AppData / Steam 白名单，System32 / Winsxs / Installer 黑名单，外加注册表与 Windows 组件噪声名称黑名单。Windows 的 `bundleId` 是规范化后的可执行文件路径，不是 bundle id，因此「始终保留」名单按显示名匹配。
+- **DPI 必须在 import GUI 库之前设定**：Python 进程在 import 任何 GUI 库**之前**设置 Per-Monitor v2 DPI awareness（失败时回退 shcore level 2 / `SetProcessDPIAware`）。这一步必须在 import 前完成，否则 pyautogui 的初始化会抢先锁定 DPI 模式，导致混合缩放屏上截图与点击坐标不一致。

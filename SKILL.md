@@ -215,7 +215,7 @@ Python 侧无需手动准备，也不会在构建期安装。
 
 当前 Windows 黑名单组合键：`ctrl+alt+delete`、`alt+f4`、`alt+tab`、`win+l`、`win+d`。其余组合键正常可用。
 
-说明：自带 CLI host 使用自动批准实现（`project/src/session.ts`），因此 `request_access` 会直接返回 `granted`，不需要人工确认弹窗；若宿主客户端自带审批层，则以客户端为准。
+说明：自带 CLI host 使用自动批准实现，因此 `request_access` 会直接返回 `granted`，不需要人工确认弹窗；若宿主客户端自带审批层，则以客户端为准。
 
 **单会话独占**：同一时刻只允许一个 computer-use 会话操作桌面，锁文件位于 `~/.computer-use-windows/computer-use.lock`。被其他活动会话持有时，工具返回 `cu_lock_held`。判定"同一会话"的身份取自 `CODEX_THREAD_ID`，缺失时退化为 `pid-<pid>`。锁的三条释放路径：持有进程退出后自动回收；任务结束时主动调 `release_lock`（**推荐收尾动作**）；持有者持续闲置超过空闲阈值（`COMPUTER_USE_LOCK_IDLE_SECS`，默认 300 秒）后被其他会话接管。
 

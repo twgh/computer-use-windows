@@ -1,10 +1,8 @@
 # MCP 工具参考
 
-> 文中 `project/src/...` 是**仓库源码路径**，只用于说明实现位置；分发包不含源码，运行时只有 `project/dist/cli.js`。
+本文件是 `SKILL.md` 的深度参考：逐个工具的参数与返回结构、`computer_batch` 动作 schema、错误码表。
 
-本文件是 `SKILL.md` 的深度参考。工具 schema 定义于 `project/src/vendor/computer-use-mcp/tools.ts`，分发与门控逻辑在 `project/src/vendor/computer-use-mcp/toolCalls.ts`。
-
-共 25 个工具。`teach_step` / `teach_batch` / `request_teach_access` 仅在 capabilities 带 `teachMode` 时注册，当前 CLI host（`project/src/computer-use/common.ts`）未开启，因此不可用。
+共 25 个工具。`teach_step` / `teach_batch` / `request_teach_access` 仅在 capabilities 带 `teachMode` 时注册，当前 CLI host 未开启，因此不可用。
 
 ## 通用约定
 
@@ -14,7 +12,7 @@
 - 失败结果带 `isError: true` 与 `telemetry.error_kind`（`telemetry` 在返回 SDK 前被剥离，客户端看不到）。错误文本已分类，不含文件路径等敏感内容。
 - `screenshot` / `zoom` 的 `save_to_disk: true` 会把 JPEG 写入 `%TEMP%\computer-use-windows\`，并在结果里多返回一条文本给出绝对路径。保存失败不会吞掉图像：错误信息与图像一起返回。
 - 除 `request_access` / `list_granted_applications` 外，所有工具都受白名单与 tier 门控（见 `SKILL.md`「权限与门控」）。
-- 服务器在 MCP `initialize` 响应里带 `instructions`（`mcpServer.ts` 的 `SERVER_INSTRUCTIONS`），把「先 `request_access` → 再 `screenshot` → 再动作」的固定顺序前置到模型第一次调用之前，并指向本 skill。是否把它喂给模型由客户端决定，因此冷启动错误文本自身也要能指路（见下文错误码表）。
+- 服务器在 MCP `initialize` 响应里带 `instructions`，把「先 `request_access` → 再 `screenshot` → 再动作」的固定顺序前置到模型第一次调用之前，并指向本 skill。是否把它喂给模型由客户端决定，因此冷启动错误文本自身也要能指路（见下文错误码表）。
 
 ## 会话与访问控制
 
@@ -121,7 +119,7 @@
 
 ### 坐标帧校验（先于一切鼠标动作）
 
-`dispatchAction`（`toolCalls.ts`）是所有独立动作与 `computer_batch` 内子动作的共用入口，在触碰任何鼠标能力之前先校验坐标帧：
+`dispatchAction` 是所有独立动作与 `computer_batch` 内子动作的共用入口，在触碰任何鼠标能力之前先校验坐标帧：
 
 - `pixels` 模式没有上一张 `screenshot` → 直接拒绝，错误文本要求先截图。不再有"按 `scaleFactor` 粗略换算"的兜底。
 - 坐标超出最近一张截图图像范围 → 拒绝（`bad_args`），并说明图像边界不是换算系数、通常是二次换算造成的。
@@ -266,7 +264,7 @@ Windows 特例：桌面窗口归属 `explorer.exe`（显示名可能是「Window
 
 ## 错误码
 
-`telemetry.error_kind` 的取值（`project/src/vendor/computer-use-mcp/toolCalls.ts`）：
+`telemetry.error_kind` 的取值：
 
 | error_kind | 含义与处置 |
 | --- | --- |
@@ -289,7 +287,7 @@ Windows 特例：桌面窗口归属 `explorer.exe`（显示名可能是「Window
 
 错误文本是「没读 skill 就直接调工具」的 agent 唯一会看到的说明，因此四处文案各自承担一段指引，改动时保持分工：
 
-- `ACCESS_GATE_GUIDANCE`（`toolCalls.ts`）—— 拼在 `allowlist_empty` 与两处 `app_not_granted` 尾部：给出可直接照做的 `request_access` 调用形状、"应用重新构建 / 移动过就要重新授权"这一常见成因（`go run` 每次换 temp 目录就是典型），以及"先加载 computer-use skill"。
-- `TIER_ANTI_SUBVERSION`（`toolCalls.ts`）—— 拼在所有 `tier_insufficient` 尾部，也在 `request_access` 的档位说明里前置出现一次。措辞刻意跨平台：点名 PowerShell SendKeys / nircmd / osascript / cliclick，并额外堵住「直接命令行调用 `windows_helper.py`」——本后端的注入器就是个普通 CLI，绕开门控重放任意动作只需一条命令，只写 macOS 那几个工具名等于给这条路留着门。
-- `LOCK_HELD_GUIDANCE`（`toolCalls.ts` 导出，`mcpServer.ts` 与 Gate-3 共用）—— 拼在 host 的 `formatLockHeldMessage` 结果与默认文案之后，三处 `cu_lock_held` 出口都覆盖，只讲被挡住这一方能做什么，重点澄清 `release_lock` **只能释放本会话**的锁（否则模型会去调一个注定无效的工具）。空闲接管的具体秒数不在这里说：只有 host 知道自己的策略，`COMPUTER_USE_LOCK_IDLE_SECS=0` 时给出接管承诺比不承诺更糟，所以由 `session.ts` 按实际配置生成。
-- `SERVER_INSTRUCTIONS`（`mcpServer.ts`）—— 见「通用约定」，是唯一前置到首次调用之前的文案位。
+- `ACCESS_GATE_GUIDANCE` —— 拼在 `allowlist_empty` 与两处 `app_not_granted` 尾部：给出可直接照做的 `request_access` 调用形状、"应用重新构建 / 移动过就要重新授权"这一常见成因（`go run` 每次换 temp 目录就是典型），以及"先加载 computer-use skill"。
+- `TIER_ANTI_SUBVERSION` —— 拼在所有 `tier_insufficient` 尾部，也在 `request_access` 的档位说明里前置出现一次。措辞刻意跨平台：点名 PowerShell SendKeys / nircmd / osascript / cliclick，并额外堵住「直接命令行调用 `windows_helper.py`」——本后端的注入器就是个普通 CLI，绕开门控重放任意动作只需一条命令，只写 macOS 那几个工具名等于给这条路留着门。
+- `LOCK_HELD_GUIDANCE` —— 拼在 host 的 `formatLockHeldMessage` 结果与默认文案之后，三处 `cu_lock_held` 出口都覆盖，只讲被挡住这一方能做什么，重点澄清 `release_lock` **只能释放本会话**的锁（否则模型会去调一个注定无效的工具）。空闲接管的具体秒数不在这里说：只有 host 知道自己的策略，`COMPUTER_USE_LOCK_IDLE_SECS=0` 时给出接管承诺比不承诺更糟，所以由 host 按实际配置生成。
+- `SERVER_INSTRUCTIONS` —— 见「通用约定」，是唯一前置到首次调用之前的文案位。
