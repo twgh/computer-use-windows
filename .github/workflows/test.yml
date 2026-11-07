@@ -55,3 +55,11 @@ jobs:
         # report fewer monitors; its assertions are environment-tolerant by
         # design. It injects no input and touches no user window.
         run: python scripts/run_tests.py
+
+      - name: Package smoke test
+        # run_tests.py checks the allowlist and the bundle-entry rules against
+        # the real repo, but never writes the archive itself; before this step
+        # a packaging breakage only surfaced at step 4 of the release flow.
+        # Producing the zip here validates the last mile on every push. The
+        # artifact stays in the runner temp dir and is not uploaded.
+        run: python scripts/package_skill.py -o "$env:TEMP/computer-use-windows-smoke.zip"
