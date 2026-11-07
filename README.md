@@ -9,7 +9,7 @@
 - **skill-first、客户端无关** —— 走 MCP over stdio，任何支持 MCP 的 agent 产品都能接，不绑定某个客户端的本机资产：没有私有 `.node` 二进制，不需要提取内部隐藏资源，只用公开依赖（`Node.js + Python + pyautogui + mss + Pillow + psutil + pywin32`）。
 - **自带可自举的 runtime** —— 首次调用工具时自动创建 venv 并装依赖；vendored 的 TypeScript 工具层（门控、坐标换算、批量执行）已接到 Windows 原生的 Python backend。
 
-装上 skill 之后**仍需一次性接通 MCP**：分发包自带 `project/dist/cli.js`（把 MCP SDK 全部内联的单文件 bundle），不需要 `npm install` / `npm run build`，`node_modules` 也不是安装前置；但客户端不会自动发现这个 server，必须把 MCP 配置指向它，工具才会出现在 agent 的工具列表里。有终端或文件写入权限的 agent 可以按 `SKILL.md`「前置检查」自助写入配置，用户只需确认一次；写入后是否还要手动重载取决于客户端——热更新客户端（如 Qoder Desktop）会在下一条用户消息开启的回合自动同步会话工具目录，启动快照客户端才需要重新加载 MCP / 重开会话。配置片段见 `references/mcp-config.json`。分发包是运行时副本，`project/` 下只有 `package.json`、`dist/cli.js` 与 `runtime/` 两个 Python 文件，不含 TypeScript 源码、`tsconfig.json` 和 `package-lock.json`。要改代码请在仓库源码树里 `cd project && npm install && npm run build`；发版前必须重建，否则 `package_skill.py` 会拒绝出包。
+装上 skill 之后**仍需一次性接通 MCP**：分发包自带 `project/dist/cli.js`（把 MCP SDK 全部内联的单文件 bundle），不需要 `npm install` / `npm run build`，`node_modules` 也不是安装前置；但客户端不会自动发现这个 server，必须把 MCP 配置指向它，工具才会出现在 agent 的工具列表里。有终端或文件写入权限的 agent 可以按 `SKILL.md`「前置检查」自助写入配置，用户只需确认一次；写入后是否还要手动重载取决于客户端——热更新客户端（如 Qoder Desktop）会在下一条用户消息开启的回合自动同步会话工具目录；启动快照客户端则需要在 MCP 页面把该 server 关掉再打开（或点「重新连接」）来新建进程；找不到 MCP 页面入口时，重启客户端效果相同。配置片段见 `references/mcp-config.json`。分发包是运行时副本，`project/` 下只有 `package.json`、`dist/cli.js` 与 `runtime/` 两个 Python 文件，不含 TypeScript 源码、`tsconfig.json` 和 `package-lock.json`。要改代码请在仓库源码树里 `cd project && npm install && npm run build`；发版前必须重建，否则 `package_skill.py` 会拒绝出包。
 
 ## 来源与许可
 
@@ -160,7 +160,7 @@ flowchart LR
 | `COMPUTER_USE_DEBUG` | `1` 开启 | 关闭 | 调试日志输出到 stderr |
 | `COMPUTER_USE_LOCK_IDLE_SECS` | 非负整数 | `300` | 会话锁空闲接管阈值（秒）；持有者闲置超过该时长后其他会话可接管，`0` 禁用接管 |
 
-前两项在进程启动时读取一次，改动后需重启 server。完整变量表（含子开关）见 `references/runtime.md`。
+前两项在进程启动时读取一次，改动后需重启 server —— 在 MCP 页面关掉再打开该 server（或点「重新连接」），找不到入口就重启客户端，两者都会新建进程。完整变量表（含子开关）见 `references/runtime.md`。
 
 ### 权限
 

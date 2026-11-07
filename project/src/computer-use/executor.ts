@@ -169,14 +169,18 @@ export function createCliExecutor(opts: {
       return result
     },
 
-    async zoom(regionLogical, _allowedBundleIds, displayId) {
+    // x/y are virtual-screen ABSOLUTE pixels: the vendor layer already folded
+    // the capture-time downsample ratio and added the display origin. The
+    // helper feeds them straight to mss as grab({left, top}); do not add a
+    // second transform here.
+    async zoom(regionPhysical, _allowedBundleIds, displayId) {
       const display = await this.getDisplaySize(displayId)
-      const [outW, outH] = zoomTargetDims(regionLogical.w, regionLogical.h, display.scaleFactor)
+      const [outW, outH] = zoomTargetDims(regionPhysical.w, regionPhysical.h, display.scaleFactor)
       return callPythonHelper('zoom', {
-        x: regionLogical.x,
-        y: regionLogical.y,
-        width: regionLogical.w,
-        height: regionLogical.h,
+        x: regionPhysical.x,
+        y: regionPhysical.y,
+        width: regionPhysical.w,
+        height: regionPhysical.h,
         targetWidth: outW,
         targetHeight: outH,
       })

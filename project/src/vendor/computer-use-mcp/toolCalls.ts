@@ -232,7 +232,7 @@ function scaleCoord(
   mode: CoordinateMode,
   display: DisplayGeometry,
   lastScreenshot: ScreenshotResult | undefined,
-  _logger: Logger,
+  logger: Logger,
 ): { x: number; y: number } {
   if (mode === "normalized_0_100") {
     // Origin offset targets the selected display in virtual-screen space.
@@ -248,7 +248,7 @@ function scaleCoord(
     // and the computer tool) agree on this.
     // Uses the display geometry stashed AT CAPTURE TIME, not fresh.
     // Origin from the same snapshot keeps clicks coherent with the captured display.
-    return {
+    const result = {
       x:
         Math.round(
           rawX * (lastScreenshot.displayWidth / lastScreenshot.width),
@@ -258,6 +258,19 @@ function scaleCoord(
           rawY * (lastScreenshot.displayHeight / lastScreenshot.height),
         ) + lastScreenshot.originY,
     };
+    // stderr-only, DEBUG=1: the one place to compare the model's image-px
+    // coords with the physical coords actually sent to SetCursorPos. This is
+    // what distinguishes a wrong transform from a model reading an image of
+    // different dimensions — the latter must NOT be "fixed" here by adding a
+    // second conversion. The optional call keeps unit-test stubs ({}) safe.
+    logger.debug?.(
+      `[computer-use] scaleCoord (${rawX},${rawY}) image-px -> (${result.x},${result.y}) physical; ` +
+        `shot ${lastScreenshot.width}x${lastScreenshot.height} / ` +
+        `display ${lastScreenshot.displayWidth}x${lastScreenshot.displayHeight} / ` +
+        `origin (${lastScreenshot.originX},${lastScreenshot.originY}) / ` +
+        `displayId ${lastScreenshot.displayId ?? "?"}`,
+    );
+    return result;
   }
 
   // No screenshot anchor: refuse instead of guessing. `dispatchAction`'s
@@ -2405,6 +2418,31 @@ async function handleScreenshot(
  * lacks displayWidth/displayHeight, so it's not assignable to
  * `ScreenshotResult` even by accident.
  */
+
+/**
+ * Zoom region: image-px of the last screenshot → physical pixels of the
+ * virtual screen, which is what mss `grab({left, top, ...})` expects.
+ *
+ * Same single transform as `scaleCoord`: fold the capture-time downsample
+ * ratio, then add the capture-time display origin. The origin is not optional
+ * — without it, zooming on any non-primary display crops the primary monitor
+ * instead, because primary origin is (0,0) and hid this for a long time.
+ */
+function zoomRegionToPhysical(
+  region: [number, number, number, number],
+  shot: ScreenshotResult,
+): { x: number; y: number; w: number; h: number } {
+  const [x0, y0, x1, y1] = region;
+  const ratioX = shot.displayWidth / shot.width;
+  const ratioY = shot.displayHeight / shot.height;
+  return {
+    x: x0 * ratioX + shot.originX,
+    y: y0 * ratioY + shot.originY,
+    w: (x1 - x0) * ratioX,
+    h: (y1 - y0) * ratioY,
+  };
+}
+
 async function handleZoom(
   adapter: ComputerUseHostAdapter,
   args: Record<string, unknown>,
@@ -2448,22 +2486,13 @@ async function handleZoom(
     );
   }
 
-  // image-px → logical-pt. Same ratio as scaleCoord (:198-199) —
-  // displayWidth / width, not 1/scaleFactor. The ratio is folded.
-  const ratioX = last.displayWidth / last.width;
-  const ratioY = last.displayHeight / last.height;
-  const regionLogical = {
-    x: x0 * ratioX,
-    y: y0 * ratioY,
-    w: (x1 - x0) * ratioX,
-    h: (y1 - y0) * ratioY,
-  };
+  const regionPhysical = zoomRegionToPhysical([x0, y0, x1, y1], last);
 
   const allowedIds = overrides.allowedApps.map((g) => g.bundleId);
   // Crop from the same display as lastScreenshot so the zoom region
   // matches the image the model is reading coords from.
   const zoomed = await adapter.executor.zoom(
-    regionLogical,
+    regionPhysical,
     allowedIds,
     last.displayId,
   );
@@ -3981,6 +4010,7 @@ export async function handleToolCall(
 
 export const _test = {
   scaleCoord,
+  zoomRegionToPhysical,
   coordToPercentageForPixelCompare,
   segmentGraphemes,
   decodedByteLength,

@@ -245,6 +245,38 @@ test("scaleCoord uses capture-time image dims and ignores scaleFactor entirely",
   );
 });
 
+// Real bug from a right-upper (Display 3) monitor: zoom cropped the primary
+// screen because the region was folded to physical pixels without adding the
+// display origin. Primary origin (0,0) hid it.
+test("zoom region on a non-primary display includes the capture-time origin", () => {
+  const offscreen = { ...shot, originX: 1920, originY: -1080 };
+  const region = [100, 50, 300, 250];
+  const primary = _test.zoomRegionToPhysical(region, shot);
+  const off = _test.zoomRegionToPhysical(region, offscreen);
+
+  // Same downsample ratio, same crop size — only the absolute position moves.
+  assert.equal(off.x, primary.x + offscreen.originX);
+  assert.equal(off.y, primary.y + offscreen.originY);
+  assert.equal(off.w, primary.w);
+  assert.equal(off.h, primary.h);
+  assert.notEqual(off.x, primary.x);
+  assert.notEqual(off.y, primary.y);
+});
+
+// The click path is the reference implementation for the same transform. Pin
+// its non-primary behaviour too, so a future "simplification" cannot bring
+// back drift on secondary monitors.
+test("pixels clicks on a non-primary display use the capture-time origin", () => {
+  const offscreen = { ...shot, originX: 1920, originY: -1080 };
+  assert.deepEqual(
+    _test.scaleCoord(600, 400, "pixels", display, offscreen, {}),
+    {
+      x: Math.round((600 * shot.displayWidth) / shot.width) + 1920,
+      y: Math.round((400 * shot.displayHeight) / shot.height) - 1080,
+    },
+  );
+});
+
 test("image budget produces the frame dimensions the gate validates against", () => {
   assert.deepEqual(targetImageSize(2560, 1600, API_RESIZE_PARAMS), [1389, 868]);
 });

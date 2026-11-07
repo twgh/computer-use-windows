@@ -40,7 +40,7 @@
 
 ## 四、环境变量
 
-- `process.env` 是 server 进程启动时从 MCP 配置 `env` 继承的副本。**改任何配置都必须重启 server**；文档和注释里不许再写"无需重启 / 改动即时生效"。
+- `process.env` 是 server 进程启动时从 MCP 配置 `env` 继承的副本。**改任何配置都必须重启 server**（MCP 页面关掉再打开 / 点「重新连接」，或直接重启客户端，都会新建 server 进程；面向用户的提示两种都要给，因为用户可能找不到 MCP 页面入口）；文档和注释里不许再写"无需重启 / 改动即时生效"。
 - 启动后锁死（模块加载时求值一次）：`COMPUTER_USE_ENABLED`、`COMPUTER_USE_COORDINATE_MODE`、`COMPUTER_USE_DEBUG`、`COMPUTER_USE_LOCK_IDLE_SECS`。
 - 每次工具调用重读：`COMPUTER_USE_PIXEL_VALIDATION`、`COMPUTER_USE_CLIPBOARD_PASTE`、`COMPUTER_USE_CLIPBOARD_GUARD`、`COMPUTER_USE_MOUSE_ANIMATION`、`COMPUTER_USE_FOCUS_BEFORE_ACTION`、`COMPUTER_USE_AUTO_TARGET_DISPLAY`。
 - 每次截图重读：`COMPUTER_USE_COORD_GRID`、`COMPUTER_USE_IMAGE_MAX_PX`、`COMPUTER_USE_IMAGE_MAX_TOKENS`。

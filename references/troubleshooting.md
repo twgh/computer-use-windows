@@ -22,7 +22,7 @@
 
 - 确认 `args[0]` 指向真实存在的 `project/dist/cli.js` 绝对路径（用正斜杠），且指向本次升级后的那个 skill 目录。
 - 写入配置时应是**合并** `mcpServers` 下的这一项，不要整份覆盖掉用户已有的其它 server。
-- 改过配置后如何让会话拿到工具，取决于客户端：热更新客户端（如 Qoder Desktop）会在**下一条用户消息开启的回合**自动同步会话工具目录，无需重启；启动快照客户端才需要手动**重新加载 MCP / 重开会话**。注册后自检失败不要在同一回合里反复重试，详见 `SKILL.md`「没有工具时的自助接入」第 4 步。
+- 改过配置后如何让会话拿到工具，取决于客户端：热更新客户端（如 Qoder Desktop）会在**下一条用户消息开启的回合**自动同步会话工具目录，无需重启；启动快照客户端则需要在 MCP 页面把该 server **关掉再打开**（或点「重新连接」）来新建进程；找不到 MCP 页面入口时，重启客户端效果相同。注册后自检失败不要在同一回合里反复重试，详见 `SKILL.md`「没有工具时的自助接入」第 4 步。
 - 不要用 `node project/dist/cli.js` 手动起进程代替注册：工具列表由客户端决定，且授权清单、截图锚点、会话锁都在长驻 server 进程内。
 - 客户端 MCP 面板显示失败时，在 `env` 里加 `COMPUTER_USE_DEBUG=1` 看 stderr 日志。
 
@@ -38,7 +38,7 @@ server 已启动却返回空工具列表时：
 
 分发包里的 `project/dist/cli.js` 会随升级被替换，它内联了 MCP SDK，不依赖 `node_modules`。若 `initialize` 返回的 `serverInfo.version` 仍是旧值、或新工具 / 新行为没出现：
 
-- 确认客户端**重启过 server 进程**：新入口只在进程启动时加载，旧进程不会热更新。
+- 确认客户端**重建过 server 进程**：在 MCP 页面把该 server 关掉再打开（或点「重新连接」）；找不到入口就重启客户端。新入口只在进程启动时加载，旧进程不会热更新。
 - 确认 `args[0]` 指向本次升级后的那个 skill 目录下的 `dist/cli.js`，没有指向另一份旧副本。
 - `src/`、`dist/` 下其它文件、`node_modules/`、`.runtime/` 都是机器本地状态，升级不会清理也不会更新；bundle 不引用它们，无需手工处理，也不要拿残留的旧源码重新构建。
 
@@ -46,7 +46,14 @@ server 已启动却返回空工具列表时：
 
 ### 改了环境变量没有生效
 
-所有环境变量都在 **server 进程启动时**从 MCP 配置的 `env` 注入：改配置后必须重启 server 进程（多数客户端需要重新加载 MCP 配置）。
+所有环境变量都在 **server 进程启动时**从 MCP 配置的 `env` 注入：改配置后必须重启 server 进程。
+
+**怎么重建 server 进程**（两种做法任选其一）：
+
+1. 在 MCP 页面把 `computer-use-windows` **关掉再打开**，或点该 server 的「重新连接」按钮 —— 客户端会终止旧进程并新建一个。
+2. **找不到 MCP 页面入口时，直接重启客户端 / IDE** —— 它会在启动时重新拉起所有 MCP server，效果相同，只是动作更大一些。
+
+两者**都是重启 server 进程**，不是热更新：新配置与新 bundle 都在进程启动时被读取，会话状态（授权清单、显示器 pin、截图锚点、桌面锁）会随旧进程清空，需要重新 `request_access`。改环境变量、升级 bundle、升级后行为仍是旧版本，都用这两个动作之一处理。
 
 `COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 还在模块加载时求值一次，是真正的常量；子开关（`COMPUTER_USE_MOUSE_ANIMATION`、`COMPUTER_USE_FOCUS_BEFORE_ACTION`、`COMPUTER_USE_CLIPBOARD_GUARD`、`COMPUTER_USE_COORD_GRID`、图像预算等）每次工具调用 / 每次截图重新读取，但读的仍是启动时那份 `process.env` ——「每次读取」只表示没有缓存成模块常量，**不等于改配置免重启**。
 
@@ -82,7 +89,7 @@ server 已启动却返回空工具列表时：
 | `state_conflict` | 调用顺序问题，如左键已按下时再次 `left_mouse_down` | 先 `left_mouse_up` 复位状态 |
 | `cu_lock_held` | 桌面被另一个 computer-use 会话占用 | 等对方结束，或等空闲接管（默认 300 秒无心跳后被接管）。`release_lock` 只能释放**本会话**的锁，此时调用是空操作。若确认持有者进程已崩溃，可删除 `~/.computer-use-windows/computer-use.lock` |
 | `display_error` | 显示器枚举失败（热插拔瞬间等） | 稍后重试 |
-| `feature_unavailable` | 会话未接线该能力 | 重启 server |
+| `feature_unavailable` | 会话未接线该能力 | 在 MCP 页面关掉再打开该 server，或重启客户端（重建进程） |
 
 被拦截的系统级组合键（需 `systemKeyCombos` 授权才可能通过）：`ctrl+alt+delete`、`alt+f4`、`alt+tab`、`win+l`、`win+d`。
 

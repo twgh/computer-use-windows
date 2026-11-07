@@ -64,7 +64,7 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 | `COMPUTER_USE_COORDINATE_MODE` | `pixels` \| `normalized_0_100` | `pixels` | 坐标语义；同时决定工具描述里呈现的坐标系文案 |
 | `COMPUTER_USE_DEBUG` | `1` 开启 | 关闭 | 调试日志到 stderr（前缀 `[computer-use]`） |
 
-**环境变量的生效边界**：所有变量都在 **server 进程启动时**从 MCP 配置的 `env` 注入，之后成为该进程 `process.env` 的副本。下文说的「每次调用 / 每次截图重新读取」，只是说代码没有把值缓存成模块常量，读的仍是这份副本 —— 运行中的进程看不到外部对配置或系统环境变量的修改。因此**改任何配置都要重启 server 进程**（多数客户端需要重新加载 MCP 配置）；只有进程内直接改 `process.env` 才可能免重启，普通用法做不到。
+**环境变量的生效边界**：所有变量都在 **server 进程启动时**从 MCP 配置的 `env` 注入，之后成为该进程 `process.env` 的副本。下文说的「每次调用 / 每次截图重新读取」，只是说代码没有把值缓存成模块常量，读的仍是这份副本 —— 运行中的进程看不到外部对配置或系统环境变量的修改。因此**改任何配置都要重启 server 进程**；常用做法是在 MCP 页面把该 server 关掉再打开（或点「重新连接」）；找不到 MCP 页面入口时重启客户端效果相同，两者都会新建进程（详见 `references/troubleshooting.md`「改了环境变量没有生效」）。只有进程内直接改 `process.env` 才可能免重启，普通用法做不到。
 
 `COMPUTER_USE_ENABLED` 与 `COMPUTER_USE_COORDINATE_MODE` 还在**模块加载时求值一次**（`project/src/computer-use/gates.ts`），是真正的常量；其余开关至少在进程内是每次读取的，但对使用者而言同样需要重启。
 
