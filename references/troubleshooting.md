@@ -111,14 +111,14 @@ server 已启动却返回空工具列表时：
 
 `scroll` 返回 `Scrolled.` 而画面没变化，先分清两类原因：
 
-- **注入的滚轮量不足一格**。Windows 的 `WM_MOUSEWHEEL` 按 `delta / WHEEL_DELTA(120)` 决定滚几行：自绘控件（XCGUI / DirectUI）整数取整后归零，浏览器则累加成不可见的小数位移。helper 早期版本走 `pyautogui.scroll()`，而它把"格数"原样当作 delta 传下去，3 格变成 delta=3 —— 症状正是"永远返回成功、永远不动"。现在两个轴都自己乘 120，细节与实测数据见 `references/runtime.md`「Windows 适配要点」。
+- **注入的滚轮量不足一格**。Windows 的 `WM_MOUSEWHEEL` 按 `delta / WHEEL_DELTA(120)` 决定滚几行：自绘控件（XCGUI / DirectUI）整数取整后归零，浏览器则累加成不可见的小数位移。helper 早期版本走 `pyautogui.scroll()`，而它把"格数"原样当作 delta 传下去，3 格变成 delta=3 —— 症状正是"永远返回成功、永远不动"。现在两个轴都自己乘 120。
 - **根本没注入**。这种情况下工具返回的是错误而不是 `Scrolled.`，按上面「门控类错误」处理。
 
 判断"到底动没动"时别只看像素差：移动光标本身会触发 hover 重绘、置前会改标题栏配色。做一次对照 —— 先只 `mouse_move` 到同一点并截图，确认画面不变，再 `scroll` 截图比对。
 
 ### 授权了控制台应用仍然被拒（Windows Terminal 宿主）
 
-报 `"Windows Terminal Host" is not in the allowed applications` 并附带一段专门说明 —— 即使 `powershell.exe` / `pwsh.exe` 已在白名单。Win11 24H2 起控制台窗口由 `WindowsTerminal.exe` 承载，前台门控与落点校验看到的是宿主进程。实测该宿主的父进程是 `svchost`、shell 不在其子树内，**没有可靠的窗口→shell 映射可穿透**（猜错等于把输入送进另一个可能已提权的 shell），所以这里不做 `resolve_window_pid` 那种穿透，只把情况说清：按提示授权宿主可拿到 terminal（click）档控制，或改用自己的 shell 工具跑命令。详见 `references/runtime.md`「Windows 适配要点」。
+报 `"Windows Terminal Host" is not in the allowed applications` 并附带一段专门说明 —— 即使 `powershell.exe` / `pwsh.exe` 已在白名单。Win11 24H2 起控制台窗口由 `WindowsTerminal.exe` 承载，前台门控与落点校验看到的是宿主进程。实测该宿主的父进程是 `svchost`、shell 不在其子树内，**没有可靠的窗口→shell 映射可穿透**（猜错等于把输入送进另一个可能已提权的 shell），所以这里不做 `resolve_window_pid` 那种穿透，只把情况说清：按提示授权宿主可拿到 terminal（click）档控制，或改用自己的 shell 工具跑命令。
 
 连带效应已修：`open_application` 对控制台应用会聚焦宿主窗口而不是每次新开一个 tab（`focus_existing_window` 匹配不到 shell 窗口时，若进程在跑且有宿主窗口就聚焦它）。多 tab 时可见的那个未必是被授权应用的 —— 这是残留的不精确处。
 

@@ -83,6 +83,31 @@ runtime.invoke(name, args)
 
 `createComputerUseMcpServer` 的第 5 个参数 `dispatch` 优先于 `context`：传了它就不会再 `bindSessionContext` 一次。
 
+## Windows 适配要点
+
+这几条都是实机验证后针对性处理的，改动前请先读原因。
+
+- **窗口归属要穿透 `ApplicationFrameWindow`**（`resolve_window_pid`）。Store 应用的可见窗口是 `ApplicationFrameWindow`，归属进程是 `ApplicationFrameHost.exe` 而非应用自身。不做这一跳，应用能出现在 `list_installed_apps` / `list_running_apps` 里，却没有任何窗口归给它：`find_window_displays` 漏报、`app_under_point` 认错进程、`prepare_for_action` 无法聚焦、前台门控直接拒绝输入 —— 结果就是「授权成功但完全无法操作」。WinUI3 自带窗口的应用（如记事本）不受影响，所以这个问题只在部分 Store 应用上暴露。
+- **stdio 一律 UTF-8**。Python 在 stdout 为管道时按 locale 编码（中文 Windows 是 cp936）输出，而 helper 用 `ensure_ascii=False` 写 JSON：不固定编码时，显示器标签里的 `·`、中文应用名、剪贴板内容都会变成 U+FFFD。调用侧设 `PYTHONIOENCODING=utf-8`，helper 自身也 `reconfigure` 一遍作为兜底。
+- **Win32 调用必须声明 `argtypes` / `restype`**。ctypes 未声明时按 `c_int`（32 位）解析返回值，x64 上会截断 HANDLE —— 曾经把剪贴板句柄截成 `0xFFFFFFFF84DA0810`，`GlobalLock` 直接 access violation。涉及指针返回的剪贴板 / 句柄 API 已显式声明。
+- **截图目标尺寸取显示器自身像素，不再乘 `scaleFactor`**。`DisplayGeometry.width/height` 在本后端已是物理像素（mss 按此抓取，PMv2 的 `GetWindowRect` 亦相符），乘缩放系数是 macOS 移植残留（那边是逻辑点）。乘上去只会放大：1280x800 的屏会被插值到 1389x868 —— 凭空多出像素、载荷更大、细节为零。分辨率足够大的屏因 token 预算限制而结果相同，所以这个偏差一直没暴露。`zoom` 的放大是刻意保留的（该工具就是为了让读不清的字变大），走独立的 `zoomTargetDims`。
+- **`prepare_for_action` 不隐藏窗口**，只把已授权应用置前（返回空数组）。`COMPUTER_USE_FOCUS_BEFORE_ACTION` 的名字反映这一语义，`focusBeforeAction` 子门控字段同理。注意：由于窗口不会被隐藏，**原子截图路径（`autoTargetDisplay` 开启，默认）不执行这一步** —— 在截图前把某个已授权窗口提到前台只会遮挡模型正在看的内容，而输入动作会自己调用它。这是与 macOS（隐藏非授权窗口、使截图更"真实"）的有意差异。
+- **`autoResolve` 已实现**：未固定显示器且允许自动解析时，helper 用 `find_window_displays` 选「已授权应用窗口所在的那块屏」。不实现的话默认永远截主屏，`COMPUTER_USE_AUTO_TARGET_DISPLAY` 就是空开关。`focusBeforeAction` 仍是 macOS 选项，helper 忽略。
+- **`type` 按连续文本批量下发**。每个 executor 调用在 Python bridge 上都是一次进程启动，逐字素调用会让 27 字符花掉 7 秒；现在连续的普通字符合并成一次调用（helper 内部仍逐字符 8ms），换行 / 制表符各自单独成键。
+- **`scroll` 不走 `pyautogui.scroll()`**。pyautogui 的 win32 实现把 `clicks` 原样塞进 `mouse_event` 的 `dwData`，**不乘 `WHEEL_DELTA(120)`**：`scroll_amount: 3`（3 格）实际发出 delta=3，即 1/40 格。自绘控件（XCGUI / DirectUI）按 `delta / 120` 取整算行数，直接归零 —— 症状是「工具返回成功，页面纹丝不动」；浏览器会累加小数 deltaY，所以这条路径在浏览器里看起来是好的。此外 pyautogui 的符号约定与 executor 的屏幕坐标 `dy` 相反（正数 = 向上滚），且它 `except (PermissionError, OSError): pass` 吞掉注入错误，永远不会报错。现在两个轴都自己乘 120、纵向按 `dy` 取负。实测（demo.exe 的 XCGUI 窗口，同一落点）：delta ±3 / ±30 → 0.00% 像素变化；-120 → 15.83%，-360 → 14.75%。
+- **`check_permissions` 恒返回已授权，且结果被记忆化。** vendored 框架的 Gate 2 会在**每次工具调用**前问一次 OS 权限，而 Windows 后端没有 TCC 可问 —— helper 返回常量 `{accessibility: true, screenRecording: true}`。这一次询问是完整的 Python 进程（实测 229ms，一次 `wait` 调用几乎全部时间都花在这里），所以 adapter 把它记忆化为每进程一次，省掉约 20% 的单次调用延迟。因此 `tcc_not_granted` 在 Windows 上永不触发、`tccState` 永不填充，该分支保留作为平台接缝；**若将来接入真实前置条件（会话 0 / 无交互桌面、RDP 断开、UAC 安全桌面），必须移除记忆化**（那些状态会在进程运行期间变化）。
+- **注册表路径必须先展开环境变量**（`expand_registry_path`，作用于 `DisplayIcon`、App Paths 默认值与 `InstallLocation` 三处）。PowerShell 的 App Paths 默认值就是 `%systemroot%\system32\WindowsPowerShell\v1.0\powershell.exe`，而授权比对用的是 `QueryFullProcessImageName` 的真实路径 —— 不展开时这条 bundleId 永远匹配不上任何进程：应用显示为已授权却无法操作，`focus_existing_window` 找不到窗口，`prepare_for_action` 还会转而去聚焦别的应用。附带效应：路径能打开了，`file_description` 才第一次读得动，显示名从退化的 `PowerShell` 变成真实的「Windows PowerShell」。未知变量 `expandvars` 原样保留，好过整条丢弃。
+- **`_force_foreground` 返回 bool 且不抛异常**。它原先只有第一次 `SetForegroundWindow` 有兜底，`AttachThreadInput` 之后的第二次在 `try/finally` 里没有 `except` —— 而后台进程抢不到前台是**常态**，于是每个输入动作都可能把原始 pywin32 元组直接甩给模型：`Tool "left_click" failed: (0, 'SetForegroundWindow', 'No error message is available')`，读起来像工具坏了且没有任何可行动信息。现在 `prepare_for_action` 忽略返回值（紧随其后的前台门控会重读真实前台，报出正确的 `app_not_granted`），`focus_existing_window` 则把结果透传给 `open_application`，让它能为"已置前"这个承诺说真话。
+- **`open_app` 的两条 `Popen` 兜底必须 `DEVNULL` 掉 stdio**。bridge 用 `execFile` 读 helper，而它 resolve 的时机是 **'close'（所有 stdio 流 EOF）**，不是 helper 自己退出。被启动的程序继承了 helper 的 stdout 句柄，这条流就一直开着到那个程序结束 —— 于是工具挂到客户端超时、返回 `-32603 did not complete`，而应用其实已经打开，模型只能重试并再开一个。`os.startfile` 走 ShellExecute 不下传句柄，所以只有兜底分支会中招（此前 `%systemroot%` 那个 bug 每次都把 `os.path.exists` 判假、正好逼进兜底，所以看起来像"冷启动慢"）。
+- **控制台应用的 `open_application` 改为聚焦宿主窗口，不再重复启动。** shell 没有自己的窗口（由 `WindowsTerminal.exe` 承载），按进程路径匹配永远找不到，于是每次调用都新开一个 tab。现在匹配不到窗口时：进程在跑 且 存在宿主窗口 → 聚焦宿主窗口。这不是驱动未授权会话的后门 —— 输入仍按前台进程单独门控，而前台是宿主。残留不精确：多 tab 时可见的那个未必是被授权应用的。
+- **`open_app` 返回 `focused` / `present` / `launched`，且 `present` 绝不启动。** 应用在运行但窗口提不起来时（后台进程抢焦点被 Windows 拒绝），旧实现照样 `os.startfile` 一遍 —— 于是"打不开"变成"多开一个"。现在 `focus_existing_window` 返回三态，`present` 直接回给工具层报 `state_conflict`。vendor 侧 `openApp` 的签名相应变成 `Promise<OpenAppOutcome | void>`，返回 `void` 的 host（macOS）会拿到一句明确"无法确认已置前"的中性文本，而不是冒领成功。
+- **`conhost.exe` 也要归 terminal 档。** 它的显示名是「Console Window Host」，不含 "terminal" 子串，落到默认分类就是 **full 档 = 完整键盘进 shell**。`TERMINAL_NAME_SUBSTRINGS` 里补了 `conhost` 与 `console window host`；刻意没加裸词 "console"，`.includes()` 下太容易误伤。
+- **窗口归属只穿透 `ApplicationFrameWindow`，不穿透终端宿主。** Win11 24H2 起控制台由 Windows Terminal 承载，`GetWindowThreadProcessId` 拿到的是宿主；实测宿主的父进程是 `svchost`（默认终端交接），shell 不在它的子树里 —— 没有可靠的窗口→shell 映射，猜错就是把输入送进另一个可能已提权的 shell。所以 `resolve_window_pid` 只管 Store 应用那一侧，控制台侧改由 `consoleHostNote()` 在前台门控与落点校验处给出专门说明（授权宿主 = terminal 档，或改用自己的 shell 工具），替代原来那句对控制台场景纯属误导的「it may have appeared since your last one」。上面那条聚焦兜底用的正是同一个宿主判定。
+- **候选清单 = 注册表安装项 ∪ 有可见窗口的进程**（`list_window_apps`）。注册表给不出 Store 应用的可读名称（计算器在 `WindowsApps` 下，既无 Uninstall 条目也无 App Paths 条目），而可见窗口是「用户能指认的应用」的最强信号。窗口来源的条目带 `origin: 'window'`：跳过安装路径白名单（便携应用可能在 `D:\appsd\` 这类任意目录），但仍要过名称黑名单。
+- **显示名优先取 exe 版本资源**（`file_description`，按路径缓存）。只作用于 App Paths 分支与 `display_name_from_path`，不覆盖 Uninstall 的 `DisplayName` —— 后者已是本地化用户可见名，覆盖后反而变差。
+- **候选清单的路径规则**：Program Files / AppData / Steam 白名单，System32 / Winsxs / Installer 黑名单，外加注册表与 Windows 组件噪声名称黑名单。Windows 的 `bundleId` 是规范化后的可执行文件路径，不是 bundle id，因此「始终保留」名单按显示名匹配。
+- **DPI 必须在 import GUI 库之前设定**：Python 进程在 import 任何 GUI 库**之前**设置 Per-Monitor v2 DPI awareness（失败时回退 shcore level 2 / `SetProcessDPIAware`）。这一步必须在 import 前完成，否则 pyautogui 的初始化会抢先锁定 DPI 模式，导致混合缩放屏上截图与点击坐标不一致。
+
 ## 不可破的不变式
 
 | 不变式 | 落点 | 破了会怎样 |
