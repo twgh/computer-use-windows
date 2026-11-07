@@ -80,36 +80,17 @@ tags:
 
 自带项目位于 `./project`（相对 skill 安装目录，即本文件所在目录）。下文所有路径均相对 skill 根目录。
 
-**不需要构建，但仍需一次性接通 MCP**：分发包自带 `project/dist/cli.js`，它是把 MCP SDK 全部内联的单文件 bundle，运行时只依赖 Node.js 内置模块，没有 `node_modules` 也能启动；但客户端不会自动发现它，首次使用必须按「前置检查：MCP 是否接通」注册一次。技能自动升级时这个文件会在包里被替换，所以 MCP 配置写死的路径会自动跑上新版本代码；升级后仍要重建 server 进程才会加载新入口（在 MCP 页面关掉再打开该 server，或重启客户端）。分发包是运行时副本，`project/` 下只有 `package.json`、`dist/cli.js` 和 `runtime/` 两个 Python 文件，不含 TypeScript 源码。
+**安装目录里不能也不必构建，但仍需一次性接通 MCP**：分发包自带 `project/dist/cli.js`，它是把 MCP SDK 全部内联的单文件 bundle，运行时只依赖 Node.js 内置模块，没有 `node_modules` 也能启动；但客户端不会自动发现它，首次使用必须按「前置检查：MCP 是否接通」注册一次。技能自动升级时这个文件会在包里被替换，所以 MCP 配置写死的路径会自动跑上新版本代码；升级后仍要重建 server 进程才会加载新入口（在 MCP 页面关掉再打开该 server，或重启客户端）。分发包是运行时副本，`project/` 下只有 `package.json`、`dist/cli.js` 和 `runtime/` 两个 Python 文件，不含 TypeScript 源码。
 
 前置条件：Node.js >= 20；系统内可用 `py -3` 或 `python`（用于创建 venv）；首次真正调用工具、自举 Python 环境时需要联网。
 
-Python 侧无需手动准备，也不会在构建期安装。
-
-> 安装目录里不能也不必构建。要改代码请在仓库源码树里 `cd project && npm install && npm run build`；发版前必须重建，否则 `package_skill.py` 会拒绝出包。
+Python 侧无需手动准备，首次调用工具时自动自举。
 
 ## 二、接通 MCP
 
-这一章是 MCP server 的配置字段说明。首次接入按「前置检查：MCP 是否接通」由 agent 自助完成；已经接通时，这里只用来调整环境变量。
+首次接入按「前置检查：MCP 是否接通」由 agent 自助完成，配置片段见 `references/mcp-config.json`（把 `<SKILL_DIR>` 换成实际安装目录的绝对路径）；已经接通时，这里只用来调整环境变量。
 
-```json
-{
-  "mcpServers": {
-    "computer-use-windows": {
-      "command": "node",
-      "args": [
-        "C:/Users/<user>/.agents/skills/computer-use-windows/project/dist/cli.js"
-      ],
-      "env": {
-        "COMPUTER_USE_DEBUG": "0",
-        "COMPUTER_USE_COORDINATE_MODE": "pixels"
-      }
-    }
-  }
-}
-```
-
-把 `args[0]` 换成实际的 `project/dist/cli.js` 绝对路径即可。常用环境变量：
+常用环境变量：
 
 | 变量 | 取值 | 默认 | 作用 |
 | --- | --- | --- | --- |
