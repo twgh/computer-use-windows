@@ -77,7 +77,7 @@ tags:
 
 ## 一、准备 runtime
 
-自带项目位于 `./project`（相对 skill 安装目录，例如 `~/.agents/skills/computer-use-windows/project`）。下文所有路径均相对 skill 根目录。
+自带项目位于 `./project`（相对 skill 安装目录，即本文件所在目录）。下文所有路径均相对 skill 根目录。
 
 **不需要构建，但仍需一次性接通 MCP**：分发包自带 `project/dist/cli.js`，它是把 MCP SDK 全部内联的单文件 bundle，运行时只依赖 Node.js 内置模块，没有 `node_modules` 也能启动；但客户端不会自动发现它，首次使用必须按「前置检查：MCP 是否接通」注册一次。技能自动升级时这个文件会在包里被替换，所以 MCP 配置写死的路径会自动跑上新版本代码；升级后仍要重建 server 进程才会加载新入口（在 MCP 页面关掉再打开该 server，或重启客户端）。分发包是运行时副本，`project/` 下只有 `package.json`、`dist/cli.js` 和 `runtime/` 两个 Python 文件，不含 TypeScript 源码。
 
@@ -217,7 +217,7 @@ Python 侧无需手动准备，也不会在构建期安装。
 
 说明：自带 CLI host 使用自动批准实现，因此 `request_access` 会直接返回 `granted`，不需要人工确认弹窗；若宿主客户端自带审批层，则以客户端为准。
 
-**单会话独占**：同一时刻只允许一个 computer-use 会话操作桌面，锁文件位于 `~/.computer-use-windows/computer-use.lock`。被其他活动会话持有时，工具返回 `cu_lock_held`。判定"同一会话"的身份取自 `CODEX_THREAD_ID`，缺失时退化为 `pid-<pid>`。锁的三条释放路径：持有进程退出后自动回收；任务结束时主动调 `release_lock`（**推荐收尾动作**）；持有者持续闲置超过空闲阈值（`COMPUTER_USE_LOCK_IDLE_SECS`，默认 300 秒）后被其他会话接管。
+**单会话独占**：同一时刻只允许一个 computer-use 会话操作桌面，锁文件位于 `%USERPROFILE%\.computer-use-windows\computer-use.lock`。被其他活动会话持有时，工具返回 `cu_lock_held`。判定"同一会话"的身份取自 `CODEX_THREAD_ID`，缺失时退化为 `pid-<pid>`。锁的三条释放路径：持有进程退出后自动回收；任务结束时主动调 `release_lock`（**推荐收尾动作**）；持有者持续闲置超过空闲阈值（`COMPUTER_USE_LOCK_IDLE_SECS`，默认 300 秒）后被其他会话接管。
 
 ## 七、平台限制
 

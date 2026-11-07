@@ -1,6 +1,6 @@
 # Runtime 参考
 
-本文件描述 `computer-use-windows` 的运行机制：目录结构、环境变量、自举链路、Python helper 协议与运行时分层。文中出现的路径都是**分发包内真实存在**的文件；源码只在仓库里，不随包分发。
+本文件描述 `computer-use-windows` 的运行机制：目录结构、环境变量、自举链路、Python helper 协议与运行时分层。文中出现的路径要么在**分发包内真实存在**，要么是运行时会创建的本地状态；源码只在仓库里，不随包分发。
 
 ## 目录结构
 
@@ -25,7 +25,7 @@ project/runtime/requirements.txt   # venv 自举的依赖指纹
 | --- | --- | --- |
 | `project/.runtime/venv/` | 自举出的 Python 虚拟环境 | 首次真正调用工具时创建 |
 | `project/.runtime/requirements.sha256` | `requirements.txt` 的 SHA-256 记录 | 与当前文件不一致才重装依赖 |
-| `~/.computer-use-windows/computer-use.lock` | 会话锁（JSON：`{sessionId, pid, lastHeartbeat}`） | `O_EXCL` 独占创建；持有进程退出后自动回收；心跳超过空闲阈值后可被其他会话接管 |
+| `%USERPROFILE%\.computer-use-windows\computer-use.lock` | 会话锁（JSON：`{sessionId, pid, lastHeartbeat}`） | `O_EXCL` 独占创建；持有进程退出后自动回收；心跳超过空闲阈值后可被其他会话接管 |
 | `%TEMP%\computer-use-windows\` | `save_to_disk: true` 保存的截图 | 仅在显式请求落盘时写入，文件名 `<screenshot\|zoom>-<时间戳>-<序号>.jpg` |
 
 除此之外 runtime 不写任何文件：日志只写 stderr，截图默认以 MCP image content 返回。落盘目录刻意不在 skill / project 树内 —— `.runtime/` 只留给自举 venv。

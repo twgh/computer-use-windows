@@ -105,20 +105,25 @@ cd scripts
 python package_skill.py                # 生成 computer-use-windows.zip
 ```
 
-打包的是纯净的 skill 目录结构：顶层**只允许** `SKILL.md`、`references/`、`project/` 三项（白名单），`.github/`、CI 配置、`AGENTS.md`、`README.md`、`scripts/`、构建产物与本地运行时数据一律不进包。`scripts/tests/test_package_skill.py` 在发布前门禁里守着这条规则。
+打包的是纯净的 skill 目录结构：顶层**只允许** `SKILL.md`、`references/`、`project/` 三项（白名单），`.github/`、CI 配置、`AGENTS.md`、`ARCHITECTURE.md`、`README.md`、`scripts/`、构建产物与本地运行时数据一律不进包。`scripts/tests/test_package_skill.py` 在发布前门禁里守着这条规则。
 
 ## 项目结构
 
 ```text
 AGENTS.md              # 开发期硬规则（agent 改仓库前读；不随 zip 分发）
+ARCHITECTURE.md        # 源码分层、调用链、不可破的不变式（维护者向；不随 zip 分发）
 SKILL.md               # 技能入口指引（使用 skill 的 agent 先读这个）
 README.md              # 本文件
 references/
-  tools.md             # 24 个 MCP 工具的完整参数与错误码
-  runtime.md           # 环境变量、helper 子命令、自举机制、分层说明
+  tools.md             # 25 个 MCP 工具的完整参数与错误码
+  runtime.md           # 环境变量、helper 子命令、自举机制、数据落点
   troubleshooting.md   # 常见故障定位与处置
 project/
   src/
+    cli.ts             # 进程入口
+    runtime.ts         # 传输无关门面（非 MCP 入口在此）
+    server.ts          # MCP 接线
+    session.ts         # 会话状态与锁回调
     computer-use/      # Windows 适配层（executor / gates / pythonBridge / imageSave / 锁）
     vendor/computer-use-mcp/  # 平台无关的 MCP 工具与门控框架
   runtime/             # Windows Python helper 与依赖清单
@@ -147,7 +152,7 @@ flowchart LR
     I --> L["应用 / 窗口 / 显示器 / 剪贴板"]
 ```
 
-分层细节见 `references/runtime.md`。
+分层、调用链与不可破的不变式见 `ARCHITECTURE.md`。
 
 ## 运行说明
 

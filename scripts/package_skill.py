@@ -74,6 +74,7 @@ EXCLUDED_FILE_PATTERNS = {
 EXCLUDED_FILE_NAMES = {
     "README.md",
     "AGENTS.md",     # dev-time agent rules, not part of the installed skill
+    "ARCHITECTURE.md",  # maintainer-only source map; points at files the zip lacks
     ".gitattributes",
     ".gitignore",
     "LICENSE",

@@ -87,7 +87,7 @@ server 已启动却返回空工具列表时：
 | `grant_flag_required` | 缺少 `clipboardRead` / `clipboardWrite` / `systemKeyCombos` | 重新 `request_access` 并显式带上对应 flag |
 | `bad_args` | 参数非法；常见于 `switch_display` 传了不存在的显示器名 | 读错误信息里列出的可用显示器名，原样重传 |
 | `state_conflict` | 调用顺序问题，如左键已按下时再次 `left_mouse_down` | 先 `left_mouse_up` 复位状态 |
-| `cu_lock_held` | 桌面被另一个 computer-use 会话占用 | 等对方结束，或等空闲接管（默认 300 秒无心跳后被接管）。`release_lock` 只能释放**本会话**的锁，此时调用是空操作。若确认持有者进程已崩溃，可删除 `~/.computer-use-windows/computer-use.lock` |
+| `cu_lock_held` | 桌面被另一个 computer-use 会话占用 | 等对方结束，或等空闲接管（默认 300 秒无心跳后被接管）。`release_lock` 只能释放**本会话**的锁，此时调用是空操作。若确认持有者进程已崩溃，可删除 `%USERPROFILE%\.computer-use-windows\computer-use.lock` |
 | `display_error` | 显示器枚举失败（热插拔瞬间等） | 稍后重试 |
 | `feature_unavailable` | 会话未接线该能力 | 在 MCP 页面关掉再打开该 server，或重启客户端（重建进程） |
 
@@ -157,7 +157,7 @@ server 已启动却返回空工具列表时：
 ## 七、重置与清理
 
 - 重建 Python 环境：删除 `project/.runtime/venv` 与 `project/.runtime/requirements.sha256`。
-- 释放卡住的会话锁：删除 `~/.computer-use-windows/computer-use.lock`（确认无活动会话后再删）。
+- 释放卡住的会话锁：删除 `%USERPROFILE%\.computer-use-windows\computer-use.lock`（确认无活动会话后再删）。
 - 从源码重新构建（正常安装 / 升级不需要）：`cd ./project && npm install && npm run build`。
 - 清理 `save_to_disk` 产生的图：删除 `%TEMP%\computer-use-windows\` 整个目录即可，其中没有任何状态。
 - 校验 skill 结构：`python ./scripts/validate_skill.py .`（UTF-8 安全，不依赖第三方库；检查 frontmatter、命名规范与 `references/` 引用是否都存在）。
