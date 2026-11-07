@@ -9,19 +9,20 @@
 - 禁止 `0.6.1`、`v0.6.0`、`0.6.0-beta`、日期版本号等任何其它写法。
 - `scripts/set_version.py` 的 `VERSION_RE` 与 `--check` 会拒绝非法格式，**不许改宽这个正则**。
 - README「更新日志」里的历史版本标题保留原样，只有新条目使用新格式。
-- 发版必须用 `python scripts/set_version.py x.y.0` 一次同步六处，**不许手工改其中任何一处**：
+- 发版必须用 `python scripts/set_version.py x.y.0` 一次同步七处，**不许手工改其中任何一处**：
   1. `SKILL.md` frontmatter `version`
-  2. `project/package.json`
-  3. `project/package-lock.json` 根 `version`
-  4. `project/package-lock.json` 的 `packages[""].version`
-  5. `project/src/vendor/computer-use-mcp/mcpServer.ts` 的 `serverInfo` 字面量
-  6. `README.md` 标题
+  2. `SKILL.md` 标题（`# Windows 电脑使用 Skill x.y.0`）
+  3. `project/package.json`
+  4. `project/package-lock.json` 根 `version`
+  5. `project/package-lock.json` 的 `packages[""].version`
+  6. `project/src/vendor/computer-use-mcp/mcpServer.ts` 的 `serverInfo` 字面量
+  7. `README.md` 标题
 
 ## 二、发版流程
 
 1. `python scripts/set_version.py x.y.0`
 2. 在 `README.md`「更新日志」**最前面**追加倒序条目：`### x.y.0：中文一句摘要`，不写日期、不加 `v`、不插链接。
-3. `cd project && npm test` —— 8 阶段必须全绿；第一阶段 `npm run build` 会生成 `project/dist/cli.js`（tsc 单测产物 + esbuild 自包含单文件 bundle），`version sites` 阶段校验格式与六处一致性。**改过版本号必须重新构建**，否则 bundle 里的 `serverInfo.version` 还是旧值。
+3. `cd project && npm test` —— 8 阶段必须全绿；第一阶段 `npm run build` 会生成 `project/dist/cli.js`（tsc 单测产物 + esbuild 自包含单文件 bundle），`version sites` 阶段校验格式与七处一致性。**改过版本号必须重新构建**，否则 bundle 里的 `serverInfo.version` 还是旧值。
 4. `python scripts/package_skill.py -o %TEMP%/computer-use-windows-x.y.0.zip`，产物放系统临时目录，不留在仓库。打包脚本会校验 `dist/cli.js` 存在、与 `SKILL.md` 版本一致、且静态 import 全为 `node:*`；不满足直接拒绝出包。
 5. 中文单行 commit：`x.y.0：摘要`。
 6. **不 push、不打 tag、不建 Release**；仓库无 release workflow，等维护者确认。

@@ -83,7 +83,7 @@ CI 跑的就是同一个入口：`.github/workflows/test.yml`，`windows-latest`
 | --- | --- |
 | build / typecheck | `tsc` 编译与类型检查 |
 | skill structure | `validate_skill.py` —— SKILL.md 结构与引用完整性 |
-| version sites | 六处版本号一致且格式为 `x.y.0`（四处声明 + `package-lock.json` 两处，`set_version.py --check`） |
+| version sites | 七处版本号一致且格式为 `x.y.0`（五处声明 + `package-lock.json` 两处，`set_version.py --check`） |
 | package allowlist | 打包顶层白名单：只收 `SKILL.md` / `references/` / `project/`，拒收 `.github` 等开发期文件 |
 | helper unit tests | Python helper 纯逻辑：滚轮量换算、注册表路径展开、抢焦点不抛异常、窗口聚焦三态、坐标网格绘制与开关透传 |
 | TS layer unit tests | `resolveGrantedApp` 逐级解析、terminal / browser 分类、坐标帧校验、`scaleCoord` 与 `scaleFactor` 解耦 |

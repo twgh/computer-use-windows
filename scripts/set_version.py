@@ -6,7 +6,7 @@ used for counting. Each release increments the first two components in decimal
 (0.5.5 -> 0.6.0 -> ... -> 0.9.0 -> 1.0.0). Both the write mode and --check
 reject anything else, so the rule cannot drift. See AGENTS.md.
 
-The version lives in six sites across five files that nothing links together at
+The version lives in seven sites across five files that nothing links together at
 build time: the vendor layer deliberately never reads package.json (no node:fs
 in that layer), so the MCP `initialize` serverInfo version has to be a literal;
 package-lock.json declares the root version twice and npm does not rewrite it
@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # (label, path, pattern used to find the current version)
 SITES: list[tuple[str, Path, re.Pattern[str]]] = [
     ("SKILL.md frontmatter", ROOT / "SKILL.md", re.compile(r"(?m)^version: ([0-9][\w.\-]*)$")),
+    ("SKILL.md title", ROOT / "SKILL.md", re.compile(r"(?m)^# Windows 电脑使用 Skill ([0-9][\w.\-]*)$")),
     ("package.json", ROOT / "project" / "package.json", re.compile(r'"version":\s*"([^"]+)"')),
     ("MCP serverInfo", ROOT / "project" / "src" / "vendor" / "computer-use-mcp" / "mcpServer.ts",
      re.compile(r'\{\s*name:\s*serverName,\s*version:\s*"([^"]+)"\s*\}')),

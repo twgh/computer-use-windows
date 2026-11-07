@@ -11,7 +11,7 @@ tags:
   - mcp
 ---
 
-# Windows 电脑使用 Skill
+# Windows 电脑使用 Skill 0.7.0
 
 ## 前置检查：MCP 是否接通
 
