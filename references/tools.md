@@ -1,5 +1,7 @@
 # MCP 工具参考
 
+> 文中 `project/src/...` 是**仓库源码路径**，只用于说明实现位置；分发包不含源码，运行时只有 `project/dist/cli.js`。
+
 本文件是 `SKILL.md` 的深度参考。工具 schema 定义于 `project/src/vendor/computer-use-mcp/tools.ts`，分发与门控逻辑在 `project/src/vendor/computer-use-mcp/toolCalls.ts`。
 
 共 25 个工具。`teach_step` / `teach_batch` / `request_teach_access` 仅在 capabilities 带 `teachMode` 时注册，当前 CLI host（`project/src/computer-use/common.ts`）未开启，因此不可用。

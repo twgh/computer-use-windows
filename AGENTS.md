@@ -21,12 +21,13 @@
 
 1. `python scripts/set_version.py x.y.0`
 2. 在 `README.md`「更新日志」**最前面**追加倒序条目：`### x.y.0：中文一句摘要`，不写日期、不加 `v`、不插链接。
-3. `cd project && npm test` —— 8 阶段必须全绿；`version sites` 阶段校验格式与六处一致性。
-4. `python scripts/package_skill.py -o %TEMP%/computer-use-windows-x.y.0.zip`，产物放系统临时目录，不留在仓库。
+3. `cd project && npm test` —— 8 阶段必须全绿；第一阶段 `npm run build` 会生成 `project/dist/cli.js`（tsc 单测产物 + esbuild 自包含单文件 bundle），`version sites` 阶段校验格式与六处一致性。**改过版本号必须重新构建**，否则 bundle 里的 `serverInfo.version` 还是旧值。
+4. `python scripts/package_skill.py -o %TEMP%/computer-use-windows-x.y.0.zip`，产物放系统临时目录，不留在仓库。打包脚本会校验 `dist/cli.js` 存在、与 `SKILL.md` 版本一致、且静态 import 全为 `node:*`；不满足直接拒绝出包。
 5. 中文单行 commit：`x.y.0：摘要`。
 6. **不 push、不打 tag、不建 Release**；仓库无 release workflow，等维护者确认。
 7. `AGENTS.md` 已被 `package_skill.py` 排除，不得进入分发 zip。
-8. 分发 zip 的顶层**只允许** `SKILL.md`、`references/`、`project/` 三项（打包脚本用白名单，不是黑名单）。`.github/`、CI 配置、`AGENTS.md`、`README.md`、`LICENSE`、`scripts/`、构建产物、编辑器 / agent 元数据一律不得进包；`scripts/tests/test_package_skill.py` 是这条规则的回归断言。
+8. 分发 zip 顶层**只允许** `SKILL.md`、`references/`、`project/` 三项（白名单，不是黑名单）；`project/` 下只允许 `package.json`、`dist/cli.js`、`runtime/windows_helper.py`、`runtime/requirements.txt` 四项，由 `package_skill.py` 的 `PROJECT_RUNTIME_ENTRIES` 精确控制。TypeScript 源码、`tsconfig.json`、`package-lock.json`、构建脚本、`node_modules/`、`.runtime/`、`dist/` 下其它 tsc 产物，以及仓库根的 `.github/`、CI 配置、`AGENTS.md`、`README.md`、`LICENSE`、`scripts/`、编辑器 / agent 元数据一律不得进包；`scripts/tests/test_package_skill.py` 是回归断言。
+9. `project/dist/cli.js` 必须是 `npm run build` 产出的自包含 esbuild bundle（运行时只 import `node:*`）。自动升级只覆盖 zip 里有的文件，而 MCP 配置写死该路径 —— 入口不随包替换，用户机器上的旧编译产物就会一直跑旧代码；bundle 内联了 MCP SDK，连旧 `node_modules` 也一并绕开。`package.json` 也必须带：`"type": "module"` 决定 Node 如何加载 `.js`，且 `pythonBridge` 用它的位置定位 `runtime/`。`validate_bundle_entry` 是这条规则的回归断言。
 
 ## 三、坐标（改这块之前必读）
 

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "computer-use-windows": {
+      "command": "node",
+      "args": [
+        "<SKILL_DIR>/project/dist/cli.js"
+      ],
+      "env": {
+        "COMPUTER_USE_DEBUG": "0",
+        "COMPUTER_USE_COORDINATE_MODE": "pixels"
+      }
+    }
+  }
+}

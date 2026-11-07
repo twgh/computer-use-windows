@@ -124,7 +124,10 @@ def main(argv: list[str]) -> int:
         print(f"{label:24s} {match.group(1)} -> {value}")
         changed += 1
 
-    print(f"\n{changed} site(s) updated. Remember: package.json and mcpServer.ts need `npm run build`.")
+    print(
+        f"\n{changed} site(s) updated. Run `cd project && npm run build` so "
+        "dist/cli.js carries the new version; packaging rejects a stale bundle."
+    )
     return 0
 
 

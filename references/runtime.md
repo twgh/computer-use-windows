@@ -1,8 +1,8 @@
 # Runtime 参考
 
-本文件描述 `computer-use-windows` 的运行机制：目录结构、环境变量、自举链路、Python helper 协议与内部分层。
+本文件描述 `computer-use-windows` 的运行机制：目录结构、环境变量、自举链路、Python helper 协议与内部分层。文中出现的 `project/src/...` 是**仓库源码路径**，只用于说明实现位置；分发包不含源码，运行时只有编译后的 `project/dist/cli.js`。
 
-## 目录结构
+## 目录结构（仓库源码树）
 
 ```text
 SKILL.md                 # 技能入口（agent 先读这个）
@@ -20,11 +20,28 @@ project/
     requirements.txt     # Python 依赖清单
   package.json           # bin: computer-use-windows -> dist/cli.js
   tsconfig.json
-  dist/                  # 构建产物（不打进 zip，需 npm run build 生成）
+  scripts/bundle.mjs     # esbuild：把 SDK 内联成自包含单文件入口
+  dist/cli.js            # 随 zip 分发的 bundle；自动升级时由包覆盖
+  dist/ 其余文件         # tsc 单测产物，仅开发期生成，不打进 zip
   .runtime/              # 机器本地状态（不打进 zip，运行时自动生成）
 scripts/
   package_skill.py       # 打包脚本
 ```
+
+分发包是运行时副本，实际只带以下文件（`project/` 下由 `package_skill.py` 的 `PROJECT_RUNTIME_ENTRIES` 精确控制）：
+
+```text
+SKILL.md
+references/tools.md
+references/runtime.md
+references/troubleshooting.md
+project/package.json               # "type": "module" + 项目根锚点
+project/dist/cli.js                # 自包含 bundle，升级时由包覆盖
+project/runtime/windows_helper.py  # Python 桌面后端
+project/runtime/requirements.txt   # venv 自举的依赖指纹
+```
+
+`src/`、`tsconfig.json`、`package-lock.json`、构建脚本、`node_modules/`、`.runtime/` 与 `dist/` 下其它 tsc 产物都不进包：bundle 自包含，源码没有运行时作用。
 
 ### 数据落点
 

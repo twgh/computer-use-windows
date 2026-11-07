@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { readFile, mkdir, access, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -6,7 +7,24 @@ import { execFileNoThrow } from '../lib/execFileNoThrow.js'
 import { logDebug } from '../lib/log.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const projectRoot = path.resolve(__dirname, '../..')
+
+/**
+ * `tsc` emits dist/computer-use/pythonBridge.js, the shipped bundle is a single
+ * dist/cli.js, and `tsx src/cli.ts` runs from src/computer-use/. A fixed number
+ * of `..` segments points at the wrong directory in two of those three, and the
+ * bundled entry is the one actually running on a user's machine. package.json
+ * is the only anchor that holds for all of them.
+ */
+function resolveProjectRoot(startDir: string): string {
+  let dir = startDir
+  for (let i = 0; i < 5; i++) {
+    if (existsSync(path.join(dir, 'package.json'))) return dir
+    dir = path.dirname(dir)
+  }
+  throw new Error(`cannot locate project root (package.json) from ${startDir}`)
+}
+
+const projectRoot = resolveProjectRoot(__dirname)
 const runtimeRoot = path.join(projectRoot, 'runtime')
 const runtimeStateRoot = path.join(projectRoot, '.runtime')
 const venvRoot = path.join(runtimeStateRoot, 'venv')

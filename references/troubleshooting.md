@@ -4,21 +4,45 @@
 
 ## 一、构建与启动
 
-### `npm run build` 失败
+### 在仓库源码树里执行 `npm run build` 失败
+
+正常安装与升级都不需要构建：分发包自带 `project/dist/cli.js`，它是自包含的单文件 bundle，不依赖 `node_modules`，也不含 `src/`、`tsconfig.json`、`package-lock.json`，所以安装目录里无法构建、也不需要构建。只有拿到仓库源码树才需要构建。
 
 - 确认 Node.js >= 20（`node -v`）。
-- 先 `npm install` 生成 `node_modules`；`dist/` 是构建产物，从 zip 安装的 skill 一定没有它。
+- 先 `npm install` 生成 `node_modules`；`npm run build` 会先跑 tsc 再跑 esbuild 覆盖 `dist/cli.js`。
 - 类型检查可单独跑：`cd ./project && npm run check`。
 
 ### server 启动了但"没有任何输出"
 
 这是正常行为：MCP over stdio，无请求时静默。需要观察内部流程时设置 `COMPUTER_USE_DEBUG=1`，日志会以 `[computer-use]` 前缀写到 **stderr**（stdout 被协议占用，不要往 stdout 打日志）。
 
+### 客户端里根本没有 computer-use 工具
+
+这通常不是构建或 bundle 问题，而是 **MCP server 没被注册**：分发包里的 `project/dist/cli.js` 只是一个可执行文件，客户端不会自动发现它。按 `SKILL.md`「前置检查：MCP 是否接通」处理，配置片段见 `references/mcp-config.json`。
+
+- 确认 `args[0]` 指向真实存在的 `project/dist/cli.js` 绝对路径（用正斜杠），且指向本次升级后的那个 skill 目录。
+- 写入配置时应是**合并** `mcpServers` 下的这一项，不要整份覆盖掉用户已有的其它 server。
+- 改过配置后如何让会话拿到工具，取决于客户端：热更新客户端（如 Qoder Desktop）会在**下一条用户消息开启的回合**自动同步会话工具目录，无需重启；启动快照客户端才需要手动**重新加载 MCP / 重开会话**。注册后自检失败不要在同一回合里反复重试，详见 `SKILL.md`「没有工具时的自助接入」第 4 步。
+- 不要用 `node project/dist/cli.js` 手动起进程代替注册：工具列表由客户端决定，且授权清单、截图锚点、会话锁都在长驻 server 进程内。
+- 客户端 MCP 面板显示失败时，在 `env` 里加 `COMPUTER_USE_DEBUG=1` 看 stderr 日志。
+
 ### 客户端里看不到任何工具
+
+server 已启动却返回空工具列表时：
 
 - `COMPUTER_USE_ENABLED=0` 时 `tools/list` 返回空数组，这是有意设计的 kill switch。检查客户端注入的环境变量。
 - 检查 MCP 配置里的 `args[0]` 是否指向真实存在的 `dist/cli.js` 绝对路径。
 - 用 `COMPUTER_USE_DEBUG=1` 启动，确认打了 `starting stdio MCP server`。
+
+### 升级后行为仍是旧版本
+
+分发包里的 `project/dist/cli.js` 会随升级被替换，它内联了 MCP SDK，不依赖 `node_modules`。若 `initialize` 返回的 `serverInfo.version` 仍是旧值、或新工具 / 新行为没出现：
+
+- 确认客户端**重启过 server 进程**：新入口只在进程启动时加载，旧进程不会热更新。
+- 确认 `args[0]` 指向本次升级后的那个 skill 目录下的 `dist/cli.js`，没有指向另一份旧副本。
+- `src/`、`dist/` 下其它文件、`node_modules/`、`.runtime/` 都是机器本地状态，升级不会清理也不会更新；bundle 不引用它们，无需手工处理，也不要拿残留的旧源码重新构建。
+
+> 维护者：改过版本号后没重新 `npm run build`，`package_skill.py` 会拒绝出包；本地构建出的 `dist/cli.js` 不会自动带上新版本。
 
 ### 改了环境变量没有生效
 
@@ -127,10 +151,10 @@
 
 - 重建 Python 环境：删除 `project/.runtime/venv` 与 `project/.runtime/requirements.sha256`。
 - 释放卡住的会话锁：删除 `~/.computer-use-windows/computer-use.lock`（确认无活动会话后再删）。
-- 重新构建：`cd ./project && npm install && npm run build`。
+- 从源码重新构建（正常安装 / 升级不需要）：`cd ./project && npm install && npm run build`。
 - 清理 `save_to_disk` 产生的图：删除 `%TEMP%\computer-use-windows\` 整个目录即可，其中没有任何状态。
 - 校验 skill 结构：`python ./scripts/validate_skill.py .`（UTF-8 安全，不依赖第三方库；检查 frontmatter、命名规范与 `references/` 引用是否都存在）。
-- 打包分发：`cd ./scripts && python package_skill.py`，产物为 `computer-use-windows.zip`（不含 `dist/`、`node_modules/`、`.runtime/`、`README.md`、`LICENSE`、`scripts/` —— 因此安装方必须自行构建，见 `SKILL.md`「准备 runtime」）。
+- 打包分发：从仓库根运行 `python scripts/package_skill.py -o <zip>`；产物 `project/` 下只有 `package.json`、`dist/cli.js`、`runtime/windows_helper.py`、`runtime/requirements.txt`，不含 TypeScript 源码、`tsconfig.json`、`package-lock.json`、`node_modules/`、`.runtime/`、`README.md`、`LICENSE`、`scripts/`。安装方开箱即用；维护者发版前必须先 `npm run build`，否则打包脚本会因入口缺失 / 版本陈旧拒绝出包。
 
 ## 八、排查时的硬性约束
 
