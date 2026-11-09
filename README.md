@@ -1,5 +1,9 @@
 # Windows 电脑使用 Skill 0.8.0
 
+## 安装方式
+
+[下载 SKILL Zip 包](https://api.skillhub.cn/api/v1/download?slug=@indiv-twgh/computer-use-windows)，[SkillHub 页面](https://skillhub.cn/skills/indiv-twgh/computer-use-windows)
+
 ## 这个项目是什么
 
 一个 Windows 桌面控制的 skill，同时是自带 MCP server 的独立 runtime：截图、鼠标、键盘、应用启动、窗口与显示器映射、剪贴板，共 25 个工具（逐个见「暴露的 MCP 工具」）。给 agent 的入口是 `SKILL.md`。
